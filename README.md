@@ -112,9 +112,9 @@ Claude Code runs normally in your terminal (no wrapper needed)
 ```
 
 **Safe by design:**
-- Timeout defaults to **deny** (not allow)
+- If Go Core is unreachable, hooks pass through locally (zero impact on normal usage)
+- Once Go Core accepts a PermissionRequest, timeout/error defaults to **deny** (not allow)
 - Shows exact tool name and command before you approve
-- Hook script checks if Go Core is running — if not, passes through (zero impact on normal usage)
 - Works with any Claude Code session, no wrapper needed
 
 **Pause when you're at your desk:**
@@ -207,6 +207,7 @@ TL_ENABLED_CHANNELS=telegram,discord
 TL_TG_BOT_TOKEN=...
 TL_TG_CHAT_ID=...
 TL_TG_REQUIRE_MENTION=true        # @bot required in groups
+TL_TG_POLL_TIMEOUT=10             # optional: lower if long-poll gets ECONNRESET/socket hang up
 TL_TG_DISABLE_LINK_PREVIEW=true   # cleaner messages
 
 # Discord
