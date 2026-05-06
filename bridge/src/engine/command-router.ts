@@ -687,15 +687,15 @@ export class CommandRouter {
       const candidate = displayed[i];
       const importedSession = importedSessionsBySdkId.get(candidate.sessionId);
       const lease = await leaseService.getActive(candidate.sessionId);
-      const markers = this.buildCandidateMarkers(candidate, lease, owner, importedSession !== undefined);
+      const markers = this.buildCandidateMarkers(candidate, lease, owner);
       const preview = candidate.nativePreview || candidate.preview || EMPTY_PREVIEW;
       const resumeCwd = this.resolveDefaultResumeWorkingDirectory(candidate, importedSession?.workingDirectory);
       const date = this.formatShortDate(candidate.lastActivityAt);
       const markerSuffix = markers.length > 0 ? ` · <i>${this.escapeHtml(markers.join(' · '))}</i>` : '';
       lines.push(
-        `${i + 1}. ${this.escapeHtml(date)}${markerSuffix}\n` +
-        `   <code>${this.escapeHtml(resumeCwd)}</code>\n` +
-        `   ${this.escapeHtml(preview)}`,
+        `${i + 1}. 🕒 ${this.escapeHtml(date)}${markerSuffix}\n` +
+        `   📁 <code>${this.escapeHtml(resumeCwd)}</code>\n` +
+        `   💬 ${this.escapeHtml(preview)}`,
       );
     }
 
@@ -719,26 +719,21 @@ export class CommandRouter {
     candidate: ClaudeNativeSessionCandidate,
     lease: NativeSessionLease | null,
     owner: string,
-    imported: boolean,
   ): string[] {
     const markers: string[] = [];
 
     if (lease) {
-      markers.push(lease.owner === owner ? 'locked by you' : `locked ${maskLeaseOwner(lease.owner)}`);
+      markers.push(lease.owner === owner ? '🔒 yours' : `🔒 ${maskLeaseOwner(lease.owner)}`);
     }
 
     if (!candidate.cwd || candidate.cwdSource === 'unknown') {
-      markers.push('cwd unknown');
+      markers.push('⚠️ cwd unknown');
     } else if (!candidate.cwdExists) {
-      markers.push('path missing');
-    }
-
-    if (imported) {
-      markers.push('imported');
+      markers.push('⚠️ path missing');
     }
 
     if (candidate.gitBranch) {
-      markers.push(`branch ${candidate.gitBranch}`);
+      markers.push(`🌿 ${candidate.gitBranch}`);
     }
 
     return markers;

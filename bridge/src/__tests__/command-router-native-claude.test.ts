@@ -370,14 +370,18 @@ describe('CommandRouter native Claude commands', () => {
 
     const html = String(lastSend(harness.adapter)?.html ?? '');
     expect(html).toContain('Claude Code history sessions');
-    expect(html).toContain('locked by you');
-    expect(html).toContain('cwd unknown');
+    expect(html).toContain('🔒 yours');
+    expect(html).toContain('⚠️ cwd unknown');
+    expect(html).toContain('📁 <code>C:\\repo</code>');
+    expect(html).toContain('💬 native-preview-native-1');
+    expect(html).not.toContain('locked by you');
+    expect(html).not.toContain('branch feature/native');
     expect(html).not.toContain('C:\\history\\native-1.jsonl');
-    expect(html).toContain('imported');
-    expect(html).toContain('feature/native');
+    expect(html).not.toContain('imported');
+    expect(html).toContain('🌿 feature/native');
     expect(html).toContain('/rc &lt;n&gt;');
-    expect(html.indexOf('locked by you')).toBeLessThan(html.indexOf('cwd unknown'));
-    expect(html.indexOf('cwd unknown')).toBeLessThan(html.indexOf('imported'));
+    expect(html.indexOf('🔒 yours')).toBeLessThan(html.indexOf('⚠️ cwd unknown'));
+    expect(html.indexOf('⚠️ cwd unknown')).toBeLessThan(html.indexOf('🌿 feature/native'));
     expect(harness.candidateCache.get(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID))).toEqual([candidate]);
 
     vi.mocked(harness.adapter.send).mockClear();
