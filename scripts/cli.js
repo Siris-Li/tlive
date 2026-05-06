@@ -367,7 +367,7 @@ Usage:
   tlive <subcommand>         Manage TLive services
 
 Web Terminal:
-  tlive claude               Wrap Claude Code with web-accessible terminal
+  tlive claude               Start Claude Code with web terminal + hook approval context
   tlive python train.py      Wrap any long-running command
   tlive npm run build        Access from phone browser via QR code
 
@@ -389,15 +389,23 @@ Hook Control:
   tlive hooks pause          Auto-allow all, no IM notifications
   tlive hooks resume         Resume IM approval flow
 
-IM Commands (in Telegram/Discord/Feishu):
+IM Commands (Telegram native Claude sessions):
+  /session                   List five native Claude Code sessions
+  /session all               List all native Claude Code sessions
+  /resume <n|current>        Resume a native Claude Code session
+  /resume <n|current> cwd "absolute path"  Resume with cwd override
+  /release                   Release native Claude takeover
+
+IM Commands (all platforms):
   /new                       New conversation
   /runtime claude|codex      Switch AI provider
+  /model <name>              Switch Claude model
+  /settings user|full|isolated  Claude settings scope
   /perm on|off               Permission prompts
   /effort low|medium|high|max  Thinking depth
   /stop                      Interrupt execution
   /verbose 0|1               Detail level (0=quiet, 1=terminal card)
-  /sessions                  List recent sessions
-  /session <n>               Switch to session
+  /hooks pause|resume        Toggle hook approval
   /help                      Show all commands
 
 In Claude Code (AI-guided):

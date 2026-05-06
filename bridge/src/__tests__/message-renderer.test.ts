@@ -266,7 +266,7 @@ describe('MessageRenderer', () => {
   // ─── Done phase ──────────────────────────────────
 
   describe('done phase', () => {
-    it('shows response text + separator + tool summary + cost', async () => {
+    it('shows response text, separator, and stats without final tool summary or cost', async () => {
       const r = createRenderer();
       r.onToolStart('Bash');
       r.onToolStart('Read');
@@ -277,11 +277,11 @@ describe('MessageRenderer', () => {
       const content = flushCallback.mock.calls[flushCallback.mock.calls.length - 1][0] as string;
       expect(content).toContain('Here is the result.');
       expect(content).toContain('───────────────');
-      expect(content).toContain('🖥️ Bash ×1');
-      expect(content).toContain('📖 Read ×2');
-      expect(content).toContain('3 total');
+      expect(content).not.toContain('🖥️ Bash ×1');
+      expect(content).not.toContain('📖 Read ×2');
+      expect(content).not.toContain('3 total');
       expect(content).toContain('📊');
-      expect(content).toContain('$0.05');
+      expect(content).not.toContain('$0.05');
       r.dispose();
     });
 
@@ -292,8 +292,8 @@ describe('MessageRenderer', () => {
       await advance(0);
       const content = flushCallback.mock.calls[flushCallback.mock.calls.length - 1][0] as string;
       expect(content).not.toContain('───────────────');
-      expect(content).toContain('🖥️ Bash ×1');
-      expect(content).toContain('1 total');
+      expect(content).not.toContain('🖥️ Bash ×1');
+      expect(content).not.toContain('1 total');
       expect(content).toContain('📊');
       r.dispose();
     });
@@ -307,8 +307,8 @@ describe('MessageRenderer', () => {
       const content = flushCallback.mock.calls[flushCallback.mock.calls.length - 1][0] as string;
       expect(content).toContain('⚠️ Stopped');
       expect(content).toContain('───────────────');
-      expect(content).toContain('🖥️ Bash ×1');
-      expect(content).toContain('📖 Read ×1');
+      expect(content).not.toContain('🖥️ Bash ×1');
+      expect(content).not.toContain('📖 Read ×1');
       r.dispose();
     });
 
@@ -322,20 +322,28 @@ describe('MessageRenderer', () => {
       r.dispose();
     });
 
-    it('filters hidden tools from counts and display', async () => {
+    it('filters hidden tools from executing counts but omits final tool summary', async () => {
       const r = createRenderer();
       r.onToolStart('Bash');
       r.onToolStart('TodoWrite');
       r.onToolStart('TaskCreate');
       r.onToolStart('ToolSearch');
       r.onToolStart('Read');
-      r.onComplete(defaultStats);
-      await advance(0);
-      const content = flushCallback.mock.calls[flushCallback.mock.calls.length - 1][0] as string;
-      expect(content).toContain('2 total');
+      await advance(300);
+      let content = flushCallback.mock.calls[flushCallback.mock.calls.length - 1][0] as string;
+      expect(content).toContain('2 tools');
+      expect(content).toContain('Bash ×1');
+      expect(content).toContain('Read ×1');
       expect(content).not.toContain('TodoWrite');
       expect(content).not.toContain('TaskCreate');
       expect(content).not.toContain('ToolSearch');
+
+      r.onComplete(defaultStats);
+      await advance(0);
+      content = flushCallback.mock.calls[flushCallback.mock.calls.length - 1][0] as string;
+      expect(content).not.toContain('2 total');
+      expect(content).not.toContain('Bash ×1');
+      expect(content).not.toContain('Read ×1');
       r.dispose();
     });
 
@@ -525,7 +533,10 @@ describe('MessageRenderer', () => {
       content = flushCallback.mock.calls[flushCallback.mock.calls.length - 1][0] as string;
       expect(content).toContain('All done!');
       expect(content).toContain('───────────────');
-      expect(content).toContain('5 total');
+      expect(content).not.toContain('5 total');
+      expect(content).not.toContain('Read ×2');
+      expect(content).not.toContain('Bash ×2');
+      expect(content).not.toContain('Grep ×1');
       expect(content).toContain('📊');
       r.dispose();
     });

@@ -44,7 +44,7 @@ tlive install skills
 包装长时间运行的命令，手机浏览器远程访问。
 
 ```bash
-tlive claude                  # 包装 Claude Code
+tlive claude                  # 带 Hook 审批上下文包装 Claude Code
 tlive python train.py         # 包装训练脚本
 tlive npm run build           # 包装构建
 ```
@@ -79,7 +79,7 @@ TLive:  ● Read(auth.ts)
         ━━━━━━━━━━━━━━━━━━
         Fixed the login bug. The token validation
         was missing the expiry check...
-        📊 12.3k/8.1k tok | $0.08 | 2m 34s
+        📊 2m 34s · 12.3k/8.1k tok
 ```
 
 **详细度控制：** `/verbose 0|1` — 安静（仅最终回复）/ 终端卡片（工具调用 + 结果 + 回复）。
@@ -89,10 +89,16 @@ TLive:  ● Read(auth.ts)
 
 ## Hook 审批
 
-在手机上审批 Claude Code 工具权限。再也不会被 `[y/N]` 提示卡住。
+在手机上审批 Claude Code 工具权限。要走 IM 审批，请从 TLive 管理的终端启动 Claude Code，这样 hook 才能拿到 `TLIVE_SESSION_ID`：
+
+```bash
+tlive hooks resume              # 启用 IM 审批
+tlive start                     # 启动 Telegram/Discord/飞书 Bridge
+tlive claude                    # 带 TLive hook 上下文启动 Claude Code
+```
 
 ```
-你在终端正常运行 Claude Code（不需要任何包装）
+Claude Code 运行在 `tlive claude` 里
   │
   ├── Claude 想执行一个命令
   │   → Hook 触发 → Go Core 接收 → Bridge 发送到手机：
@@ -112,10 +118,10 @@ TLive:  ● Read(auth.ts)
 ```
 
 **安全设计：**
-- 超时默认**拒绝**（不是允许）
-- 审批前显示具体工具名和命令内容
 - Hook 脚本先检查 Go Core 是否运行 — 没运行则直接放行（零影响）
-- 适用于任何 Claude Code 会话，不需要包装器
+- 如果 Claude Code 不是通过 `tlive <cmd>` 启动，hook 没有 `TLIVE_SESSION_ID`，会直接本地放行
+- 一旦 Go Core 接收了 PermissionRequest，超时/错误默认**拒绝**（不是允许）
+- 审批前显示具体工具名和命令内容
 
 **坐在电脑旁时暂停：**
 
@@ -146,7 +152,7 @@ tlive hooks resume             # 恢复 IM 审批
 ### CLI
 
 ```bash
-tlive <cmd>                # Web 终端
+tlive <cmd>                # Web 终端；Hook 审批请用 `tlive claude`
 tlive setup                # 配置 IM 平台
 tlive install skills       # 注册 hooks + Claude Code 技能
 tlive start                # 启动 Bridge 守护进程
@@ -188,6 +194,29 @@ tlive hooks resume         # 恢复 Hook（IM 审批）
 - `/resume <n|current>` — 在 Telegram 接管列表中的会话，或重新接管当前已导入会话。
 - `/resume <n|current> cwd "<绝对路径>"` — 接管时覆盖工作目录。
 - `/release` — 释放 Telegram 接管，并显示桌面端 `claude --resume <session-id>` 命令。
+
+接管成功后，Telegram 会显示接管工作目录、可用时显示 git 分支、桌面端 resume 命令、租约时间，以及当前 Model/Effort/Perm 状态。默认 Effort 显示为 `xhigh`，但不会主动向 SDK 传 effort；只有显式运行 `/effort` 后才会传入对应设置。
+
+### 响应状态卡片
+
+- 进行中的消息保留工具进度、耗时、todo 和权限提示。
+- 最终消息保留耗时和 token 数。
+- 最终消息不再显示花费，也不再显示最终工具汇总。
+
+### 本地包测试
+
+不发布到 npm，直接把当前工作区安装成全局 `tlive` 命令：
+
+```bash
+tlive stop
+npm --prefix bridge run build
+npm pack
+npm install -g ./tlive-0.8.0.tgz
+tlive install skills
+tlive version
+```
+
+通常不需要先卸载；只有全局路径不对，或 Windows 提示文件被占用时，再运行 `npm uninstall -g tlive`。
 
 ## 配置
 

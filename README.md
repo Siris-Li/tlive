@@ -44,7 +44,7 @@ Platform setup guides: [Telegram](docs/setup-telegram.md) · [Discord](docs/setu
 Wrap any long-running command. Access from your phone's browser.
 
 ```bash
-tlive claude                  # Wrap Claude Code
+tlive claude                  # Wrap Claude Code with hook approval context
 tlive python train.py         # Wrap a training script
 tlive npm run build           # Wrap a build
 ```
@@ -79,7 +79,7 @@ TLive:  ● Read(auth.ts)
         ━━━━━━━━━━━━━━━━━━
         Fixed the login bug. The token validation
         was missing the expiry check...
-        📊 12.3k/8.1k tok | $0.08 | 2m 34s
+        📊 2m 34s · 12.3k/8.1k tok
 ```
 
 **Verbose levels:** `/verbose 0|1` — quiet (final answer only) / terminal card (tool calls + results + response).
@@ -89,10 +89,16 @@ TLive:  ● Read(auth.ts)
 
 ## Hook Approval
 
-Approve Claude Code tool permissions from your phone. Never get blocked by a `[y/N]` prompt again.
+Approve Claude Code tool permissions from your phone. For IM approval, run Claude Code from a TLive-managed terminal so hooks receive a `TLIVE_SESSION_ID`:
+
+```bash
+tlive hooks resume              # enable IM approval
+tlive start                     # start Telegram/Discord/Feishu Bridge
+tlive claude                    # start Claude Code with TLive hook context
+```
 
 ```
-Claude Code runs normally in your terminal (no wrapper needed)
+Claude Code runs inside `tlive claude`
   │
   ├── Claude wants to run a command
   │   → Hook fires → Go Core receives → Bridge sends to your phone:
@@ -113,9 +119,9 @@ Claude Code runs normally in your terminal (no wrapper needed)
 
 **Safe by design:**
 - If Go Core is unreachable, hooks pass through locally (zero impact on normal usage)
+- If a Claude Code session was not launched through `tlive <cmd>`, hooks pass through locally because no `TLIVE_SESSION_ID` is present
 - Once Go Core accepts a PermissionRequest, timeout/error defaults to **deny** (not allow)
 - Shows exact tool name and command before you approve
-- Works with any Claude Code session, no wrapper needed
 
 **Pause when you're at your desk:**
 
@@ -151,7 +157,7 @@ tlive hooks resume             # Back to IM approval
 ### CLI
 
 ```bash
-tlive <cmd>                # Web terminal
+tlive <cmd>                # Web terminal; use `tlive claude` for hook approval
 tlive setup                # Configure IM platforms
 tlive install skills       # Register hooks + Claude Code skill
 tlive start                # Start Bridge daemon
@@ -197,6 +203,29 @@ tlive hooks resume         # Resume hooks (IM approval)
 - `/resume <n|current>` — take over a listed or current imported Claude Code session from Telegram.
 - `/resume <n|current> cwd "<absolute path>"` — override the working directory when resuming.
 - `/release` — release the Telegram takeover and show the desktop `claude --resume <session-id>` command.
+
+When a session is resumed, Telegram shows the resume cwd, git branch when available, desktop resume command, lease time, and current Model/Effort/Perm status. Default effort is displayed as `xhigh` while leaving Claude Code's SDK effort unset unless you explicitly run `/effort`.
+
+### Response status cards
+
+- In-progress messages keep tool progress, elapsed time, todos, and permission prompts.
+- Final messages keep elapsed time and token counts.
+- Final messages do not show cost or a final tool summary.
+
+### Local package testing
+
+To install the current working tree as the global `tlive` command without publishing to npm:
+
+```bash
+tlive stop
+npm --prefix bridge run build
+npm pack
+npm install -g ./tlive-0.8.0.tgz
+tlive install skills
+tlive version
+```
+
+You normally do not need to uninstall first; use `npm uninstall -g tlive` only if the global path is wrong or Windows reports files are in use.
 
 > **IM Commands:** These slash commands also appear in Telegram's native bot menu automatically.
 

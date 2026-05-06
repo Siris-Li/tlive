@@ -9,6 +9,15 @@ All notable changes to this project will be documented in this file.
 
 * **bridge:** add /menu control panel with button-based UI ([#34](https://github.com/y49/tlive/issues/34)) ([#35](https://github.com/y49/tlive/issues/35)) ([4344db9](https://github.com/y49/tlive/commit/4344db9465d8f631f1a3b1338e4e9b42ffc53c4f))
 * **bridge:** SDK capabilities — LiveSession, TodoWrite, cost tracking, AskUserQuestion ([#33](https://github.com/y49/tlive/issues/33)) ([21b5af7](https://github.com/y49/tlive/commit/21b5af7245f279527a1e7555a752faf54545f227))
+* **telegram:** replace native Claude session aliases with `/session`, `/session all`, `/resume`, and `/release`
+* **telegram:** support `/resume <n|current> cwd "<absolute path>"` for mobile-friendly cwd overrides
+* **telegram:** show resume cwd, git branch, desktop resume command, lease, Model, Effort, and Perm in the resume success card
+
+### Bug Fixes
+
+* **bridge:** display default resume effort as `xhigh` without forcing SDK effort unless `/effort` is set
+* **bridge:** remove cost and final tool summary from completed messages while keeping elapsed time, token counts, and in-progress tool progress
+* **telegram:** update bot menu and help text to hide old native Claude session aliases
 
 ## [0.7.4](https://github.com/y49/tlive/compare/v0.7.3...v0.7.4) (2026-04-06)
 

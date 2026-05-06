@@ -509,6 +509,9 @@ describe('CommandRouter native Claude commands', () => {
     expect(successHtml).toContain('🕒 Lease: 30 min');
     expect(successHtml).toContain('💻 <code>claude --resume native-b</code>');
     expect(successHtml).toContain('Use <code>/release</code> when done.');
+    expect(successHtml).toContain('🤖 Model: default');
+    expect(successHtml).toContain('🧠 Effort: xhigh');
+    expect(successHtml).toContain('🔐 Perm: off');
     expect(successHtml).toContain('Runtime: switched to Claude');
     expect(String(vi.mocked(harness.adapter.send).mock.calls[1]?.[0]?.html ?? '')).toContain('Recent context');
   });

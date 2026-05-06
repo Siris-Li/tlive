@@ -37,7 +37,7 @@ describe('CostTracker', () => {
     vi.advanceTimersByTime(154000); // 2m 34s
     const stats = tracker.finish({ input_tokens: 12345, output_tokens: 8100, cost_usd: 0.08 });
     const formatted = CostTracker.format(stats);
-    expect(formatted).toBe('📊 12.3k/8.1k tok | $0.08 | 2m 34s');
+    expect(formatted).toBe('📊 2m 34s · 12.3k/8.1k tok');
     vi.useRealTimers();
   });
 
@@ -48,11 +48,12 @@ describe('CostTracker', () => {
     expect(formatted).toContain('800/200 tok');
   });
 
-  it('formats cost with 2 decimal places', () => {
+  it('omits cost even when cost_usd is present', () => {
     tracker.start();
     const stats = tracker.finish({ input_tokens: 100, output_tokens: 50, cost_usd: 1.5 });
     const formatted = CostTracker.format(stats);
-    expect(formatted).toContain('$1.50');
+    expect(formatted).not.toContain('$');
+    expect(formatted).not.toContain('Σ');
   });
 
   it('formats duration under 1 minute as seconds', () => {

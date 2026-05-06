@@ -883,6 +883,8 @@ export class CommandRouter {
       switchedToClaude,
       isolatedSettings: llm instanceof ClaudeSDKProvider && llm.getSettingSources().length === 0,
       permissionsOff: this.state.getPermMode(msg.channelType, msg.chatId) === 'off',
+      model: this.state.getModel(msg.channelType, msg.chatId),
+      effort: this.state.getEffort(msg.channelType, msg.chatId) ?? 'xhigh',
     });
     await adapter.send({ chatId: msg.chatId, html });
 
@@ -988,6 +990,8 @@ export class CommandRouter {
     switchedToClaude: boolean;
     isolatedSettings: boolean;
     permissionsOff: boolean;
+    model?: string;
+    effort: string;
   }): string {
     const lines = [
       '🔄 <b>Claude session resumed</b>',
@@ -1001,6 +1005,9 @@ export class CommandRouter {
     }
 
     lines.push(`🕒 Lease: ${NATIVE_LEASE_TTL_MINUTES} min`);
+    lines.push(`🤖 Model: ${this.escapeHtml(params.model ?? 'default')}`);
+    lines.push(`🧠 Effort: ${this.escapeHtml(params.effort)}`);
+    lines.push(`🔐 Perm: ${params.permissionsOff ? 'off' : 'on'}`);
 
     if (params.switchedToClaude) {
       lines.push('Runtime: switched to Claude');

@@ -159,7 +159,7 @@ In Claude Code (/tlive):
   /tlive doctor        Diagnose issues + suggest fixes
 
 In terminal (tlive):
-  tlive <cmd>          Wrap command with web terminal (e.g. tlive claude)
+  tlive <cmd>          Wrap command with web terminal (use tlive claude for hook approval)
   tlive setup          Configure IM platforms (interactive)
   tlive install skills Install /tlive skill + hooks to Claude Code
   tlive hooks pause    Auto-allow permissions, no IM notifications
@@ -174,8 +174,11 @@ In IM (from phone):
   /effort low|medium|high|max  Thinking depth
   /stop                      Interrupt execution
   /verbose 0|1               Detail level (quiet/terminal card)
-  /sessions                  List recent sessions
-  /session <n>               Switch to session
+  /session                   Telegram: list five native Claude Code sessions
+  /session all               Telegram: list all native Claude Code sessions
+  /resume <n|current>        Telegram: resume a native Claude Code session
+  /resume <n|current> cwd "absolute path"  Telegram: resume with cwd override
+  /release                   Telegram: release native Claude takeover
   /hooks pause|resume        Toggle hook approval
   /status                    Check status
   /help                      Show commands
@@ -187,5 +190,6 @@ In IM (from phone):
 - Always check for config.env before starting — without it the daemon crashes and leaves a stale PID file
 - Bridge and Go Core web terminal are independent — Bridge works without Go Core
 - Go Core is started separately via `tlive <cmd>` in a terminal, not by this skill
+- Hook approval requires Claude Code to be launched through `tlive claude` so hooks receive `TLIVE_SESSION_ID`; ordinary `claude` sessions pass hooks through locally
 - Config at `~/.tlive/config.env` — shared by both Bridge and Go Core
 - The daemon runs as a background Node.js process

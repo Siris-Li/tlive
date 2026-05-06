@@ -243,9 +243,6 @@ export class MessageRenderer {
       }
       lines.push('⚠️ Stopped');
       lines.push(SEPARATOR);
-      if (this.totalTools > 0) {
-        lines.push(this.renderToolSummary());
-      }
       if (this.costLine) {
         lines.push(this.costLine);
       }
@@ -257,9 +254,6 @@ export class MessageRenderer {
       // Ensure text ends cleanly before separator (strip trailing whitespace but keep content)
       lines.push(this.responseText.trimEnd());
       lines.push(SEPARATOR);
-    }
-    if (this.totalTools > 0) {
-      lines.push(this.renderToolSummary());
     }
     if (this.costLine) {
       lines.push(this.costLine);
