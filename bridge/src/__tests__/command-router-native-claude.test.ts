@@ -305,7 +305,7 @@ afterEach(() => {
 });
 
 describe('CommandRouter native Claude commands', () => {
-  it('shows the resume working directory instead of JSONL identifiers in /claude_sessions results', async () => {
+  it('shows the resume working directory instead of JSONL identifiers in /session results', async () => {
     const candidate = makeCandidate('native-display', {
       sourcePath: 'C:\\history\\native-display.jsonl',
       cwd: undefined,
@@ -317,7 +317,7 @@ describe('CommandRouter native Claude commands', () => {
       scanNativeSessions: async () => [candidate],
     });
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/claude_sessions'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
 
     const html = String(lastSend(harness.adapter)?.html ?? '');
     expect(html).toContain('C:\\repo');
@@ -326,7 +326,7 @@ describe('CommandRouter native Claude commands', () => {
     expect(html).not.toContain('native-display</code>');
   });
 
-  it('uses an existing imported session working directory as the /claude_sessions resume path', async () => {
+  it('uses an existing imported session working directory as the /session resume path', async () => {
     const imported = makeImportedSession({
       sdkSessionId: 'native-existing-display',
       workingDirectory: 'D:\\stable\\repo',
@@ -342,7 +342,7 @@ describe('CommandRouter native Claude commands', () => {
     });
     await harness.store.saveSession(imported);
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/claude_sessions'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
 
     const html = String(lastSend(harness.adapter)?.html ?? '');
     expect(html).toContain('D:\\stable\\repo');
@@ -350,7 +350,7 @@ describe('CommandRouter native Claude commands', () => {
     expect(html).not.toContain('native-existing-display.jsonl');
   });
 
-  it('formats /cs results, caches candidates, and supports /claude-sessions and /claude_sessions aliases', async () => {
+  it('formats /session results and caches candidates', async () => {
     const imported = makeImportedSession({ sdkSessionId: 'native-1' });
     const candidate = makeCandidate('native-1', {
       sourcePath: 'C:\\history\\native-1.jsonl',
@@ -366,7 +366,7 @@ describe('CommandRouter native Claude commands', () => {
     const previousActivity = new Date(Date.now() - 60_000).toISOString();
     await saveLease(harness.store, 'native-1', imported.id, nativeLeaseOwner(CHANNEL_TYPE, CHAT_ID), previousActivity);
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/cs'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
 
     const html = String(lastSend(harness.adapter)?.html ?? '');
     expect(html).toContain('📋 Claude Code history sessions');
@@ -380,18 +380,10 @@ describe('CommandRouter native Claude commands', () => {
     expect(html).not.toContain('C:\\history\\native-1.jsonl');
     expect(html).not.toContain('imported');
     expect(html).toContain('🌿 feature/native');
-    expect(html).toContain('/rc &lt;n&gt;');
+    expect(html).toContain('/resume &lt;n&gt;');
     expect(html.indexOf('🔒 yours')).toBeLessThan(html.indexOf('⚠️ cwd unknown'));
     expect(html.indexOf('⚠️ cwd unknown')).toBeLessThan(html.indexOf('🌿 feature/native'));
     expect(harness.candidateCache.get(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID))).toEqual([candidate]);
-
-    vi.mocked(harness.adapter.send).mockClear();
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/claude-sessions'));
-    expect(String(lastSend(harness.adapter)?.html ?? '')).toContain('Claude Code history sessions');
-
-    vi.mocked(harness.adapter.send).mockClear();
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/claude_sessions'));
-    expect(String(lastSend(harness.adapter)?.html ?? '')).toContain('Claude Code history sessions');
   });
 
   it('shows only five native sessions by default and caches those five', async () => {
@@ -403,7 +395,7 @@ describe('CommandRouter native Claude commands', () => {
       scanNativeSessions: async () => candidates,
     });
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/claude_sessions'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
 
     const html = String(lastSend(harness.adapter)?.html ?? '');
     expect(html).toContain('preview-1');
@@ -411,11 +403,11 @@ describe('CommandRouter native Claude commands', () => {
     expect(html).toContain('💬 preview-1\n\n2. 🕒');
     expect(html).not.toContain('preview-6');
     expect(html).toContain('Showing 5 of 7');
-    expect(html).toContain('/claude_sessions all');
+    expect(html).toContain('/session all');
     expect(harness.candidateCache.get(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID))).toEqual(candidates.slice(0, 5));
   });
 
-  it('shows and caches all native sessions when /cs all is used', async () => {
+  it('shows and caches all native sessions when /session all is used', async () => {
     const candidates = Array.from({ length: 7 }, (_, index) => makeCandidate(`native-all-${index + 1}`, {
       cwd: `C:\\repo-all-${index + 1}`,
       nativePreview: `all-preview-${index + 1}`,
@@ -424,7 +416,7 @@ describe('CommandRouter native Claude commands', () => {
       scanNativeSessions: async () => candidates,
     });
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/cs all'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session all'));
 
     const html = String(lastSend(harness.adapter)?.html ?? '');
     expect(html).toContain('all-preview-1');
@@ -436,7 +428,7 @@ describe('CommandRouter native Claude commands', () => {
   it('rejects native Claude commands outside Telegram', async () => {
     const harness = createHarness({ channelType: 'discord' });
 
-    for (const text of ['/claude-sessions', '/cs', '/resume-claude 1', '/rc current', '/release']) {
+    for (const text of ['/claude-sessions', '/cs', '/resume-claude 1', '/resume current', '/release']) {
       vi.mocked(harness.adapter.send).mockClear();
       const handled = await harness.commandRouter.handle(harness.adapter, makeMessage(text, 'discord'));
       expect(handled).toBe(true);
@@ -444,25 +436,25 @@ describe('CommandRouter native Claude commands', () => {
     }
   });
 
-  it('requires cached candidates before numeric /rc', async () => {
+  it('requires cached candidates before numeric /resume', async () => {
     const harness = createHarness();
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/rc 1'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1'));
 
-    expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('/claude-sessions');
+    expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('/session');
   });
 
-  it('resumes a numeric cached candidate from the Telegram-compatible /resume_claude alias', async () => {
+  it('resumes a numeric cached candidate from the Telegram-compatible /resume alias', async () => {
     const cwd = createTempDir('resume-underscore-target');
     const candidate = makeCandidate('native-underscore', { cwd, cwdExists: true });
     const harness = createHarness({
       scanNativeSessions: async () => [candidate],
     });
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/cs'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
     vi.mocked(harness.adapter.send).mockClear();
 
-    const handled = await harness.commandRouter.handle(harness.adapter, makeMessage('/resume_claude 1'));
+    const handled = await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1'));
 
     expect(handled).toBe(true);
     const resumed = (await harness.store.listSessions()).find(session => session.sdkSessionId === 'native-underscore');
@@ -492,10 +484,10 @@ describe('CommandRouter native Claude commands', () => {
     harness.state.setRuntime(CHANNEL_TYPE, CHAT_ID, 'codex');
     harness.state.setPermMode(CHANNEL_TYPE, CHAT_ID, 'off');
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/cs'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
     vi.mocked(harness.adapter.send).mockClear();
 
-    const handled = await harness.commandRouter.handle(harness.adapter, makeMessage('/rc 1'));
+    const handled = await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1'));
 
     expect(handled).toBe(true);
     const resumed = (await harness.store.listSessions()).find(session => session.sdkSessionId === 'native-b');
@@ -507,21 +499,30 @@ describe('CommandRouter native Claude commands', () => {
     expect(await harness.leaseService.getActive('native-a')).toBeNull();
     expect(harness.state.getRuntime(CHANNEL_TYPE, CHAT_ID)).toBe('claude');
     expect(harness.candidateCache.get(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID))).toBeNull();
-    expect(String(vi.mocked(harness.adapter.send).mock.calls[0]?.[0]?.html ?? '')).toContain('/release');
-    expect(String(vi.mocked(harness.adapter.send).mock.calls[0]?.[0]?.html ?? '')).toContain('switched');
+    const successHtml = String(vi.mocked(harness.adapter.send).mock.calls[0]?.[0]?.html ?? '');
+    expect(successHtml).toContain('🔄 <b>Claude session resumed</b>');
+    expect(successHtml).not.toContain('🟣 <b>Claude native session resumed</b>');
+    expect(successHtml).not.toContain('<b>Session:</b>');
+    expect(successHtml).not.toContain('<b>TLive session:</b>');
+    expect(successHtml).toContain(`📁 <code>${cwd}</code>`);
+    expect(successHtml).toContain('🌿 <code>main</code>');
+    expect(successHtml).toContain('🕒 Lease: 30 min');
+    expect(successHtml).toContain('💻 <code>claude --resume native-b</code>');
+    expect(successHtml).toContain('Use <code>/release</code> when done.');
+    expect(successHtml).toContain('Runtime: switched to Claude');
     expect(String(vi.mocked(harness.adapter.send).mock.calls[1]?.[0]?.html ?? '')).toContain('Recent context');
   });
 
-  it('rejects /rc while the chat is running before importing or rebinding', async () => {
+  it('rejects /resume while the chat is running before importing or rebinding', async () => {
     const candidate = makeCandidate('native-running', { cwd: createTempDir('running-target') });
     const harness = createHarness({
       scanNativeSessions: async () => [candidate],
       isChatActive: () => true,
     });
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/cs'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
     vi.mocked(harness.adapter.send).mockClear();
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/rc 1'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1'));
 
     expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('/stop');
     expect((await harness.store.listSessions()).some(session => session.sdkSessionId === 'native-running')).toBe(false);
@@ -533,14 +534,14 @@ describe('CommandRouter native Claude commands', () => {
     const findNativeSessionById = vi.fn(async (sessionId: string) => sessionId === candidate.sessionId ? candidate : null);
     const harness = createHarness({ findNativeSessionById });
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/rc 1234567890abcdef'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1234567890abcdef'));
 
     expect(findNativeSessionById).toHaveBeenCalledWith('1234567890abcdef');
     const resumed = (await harness.store.listSessions()).find(session => session.sdkSessionId === '1234567890abcdef');
     expect(resumed).toBeTruthy();
     expect((await harness.store.getBinding(CHANNEL_TYPE, CHAT_ID))?.sessionId).toBe(resumed?.id);
     const html = String(vi.mocked(harness.adapter.send).mock.calls[0]?.[0]?.html ?? '');
-    expect(html).toContain('TLive session');
+    expect(html).not.toContain('TLive session');
     expect(html).toContain('claude --resume 1234567890abcdef');
   });
   it('reuses an existing imported session for the same sdkSessionId', async () => {
@@ -555,9 +556,9 @@ describe('CommandRouter native Claude commands', () => {
     });
     await harness.store.saveSession(existing);
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/cs'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
     vi.mocked(harness.adapter.send).mockClear();
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/rc 1'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1'));
 
     const rebound = await harness.store.getBinding(CHANNEL_TYPE, CHAT_ID);
     const session = await harness.store.getSession(existing.id);
@@ -575,9 +576,9 @@ describe('CommandRouter native Claude commands', () => {
       scanNativeSessions: async () => [candidate],
     });
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/cs'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
     vi.mocked(harness.adapter.send).mockClear();
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/rc 1'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1'));
 
     const resumed = (await harness.store.listSessions()).find(session => session.sdkSessionId === 'native-default-cwd');
     expect(resumed?.workingDirectory).toBe('C:\\repo');
@@ -593,9 +594,9 @@ describe('CommandRouter native Claude commands', () => {
       scanNativeSessions: async () => [candidate],
     });
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/cs'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
     vi.mocked(harness.adapter.send).mockClear();
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/rc 1'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1'));
 
     const resumed = (await harness.store.listSessions()).find(session => session.sdkSessionId === 'native-missing');
     expect(resumed?.workingDirectory).toBe('C:\\missing-path');
@@ -604,7 +605,7 @@ describe('CommandRouter native Claude commands', () => {
     );
   });
 
-  it('accepts a quoted absolute --cwd override with spaces and updates the imported session cwd', async () => {
+  it('accepts a quoted absolute cwd override with spaces and updates the imported session cwd', async () => {
     const overrideDir = createTempDir('project with spaces');
     const candidate = makeCandidate('native-override', {
       cwd: 'C:\\missing-path',
@@ -614,11 +615,11 @@ describe('CommandRouter native Claude commands', () => {
       scanNativeSessions: async () => [candidate],
     });
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/cs'));
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
     vi.mocked(harness.adapter.send).mockClear();
     await harness.commandRouter.handle(
       harness.adapter,
-      makeMessage(`/rc 1 --cwd "${overrideDir}"`),
+      makeMessage(`/resume 1 cwd "${overrideDir}"`),
     );
 
     const resumed = (await harness.store.listSessions()).find(session => session.sdkSessionId === 'native-override');
@@ -626,7 +627,7 @@ describe('CommandRouter native Claude commands', () => {
     expect(String(vi.mocked(harness.adapter.send).mock.calls[0]?.[0]?.html ?? '')).toContain(overrideDir);
   });
 
-  it('resumes /rc current from the current imported binding without cache and honors --cwd', async () => {
+  it('resumes /resume current from the current imported binding without cache and honors cwd', async () => {
     const overrideDir = createTempDir('current resume');
     const current = makeImportedSession({
       id: 'session-imported-current',
@@ -640,7 +641,7 @@ describe('CommandRouter native Claude commands', () => {
 
     await harness.commandRouter.handle(
       harness.adapter,
-      makeMessage(`/rc current --cwd "${overrideDir}"`),
+      makeMessage(`/resume current cwd "${overrideDir}"`),
     );
 
     expect((await harness.store.getSession(current.id))?.workingDirectory).toBe(overrideDir);
@@ -669,12 +670,12 @@ describe('CommandRouter native Claude commands', () => {
     expect(html.toLowerCase()).toContain('desktop');
   });
 
-  it('rejects /release, /new, /session, and /runtime codex while the chat is running', async () => {
+  it('rejects /release, /new, and /runtime codex while the chat is running', async () => {
     const harness = createHarness({
       isChatActive: () => true,
     });
 
-    for (const text of ['/release', '/new', '/session 1', '/runtime codex']) {
+    for (const text of ['/release', '/new', '/runtime codex']) {
       vi.mocked(harness.adapter.send).mockClear();
       await harness.commandRouter.handle(harness.adapter, makeMessage(text));
       const sentText = String(lastSend(harness.adapter)?.text ?? '');
@@ -702,7 +703,7 @@ describe('CommandRouter native Claude commands', () => {
     expect(harness.permissions.clearSessionWhitelist).toHaveBeenCalled();
   });
 
-  it('auto-releases the current native lease on /session when the chat is idle', async () => {
+  it('does not switch old TLive sessions through /session numbers', async () => {
     const current = makeImportedSession({
       id: 'session-imported-session-switch',
       sdkSessionId: 'native-session-switch',
@@ -715,14 +716,17 @@ describe('CommandRouter native Claude commands', () => {
     const harness = createHarness();
     await bindCurrentImportedSession(harness.store, current);
     await harness.store.saveSession(target);
-    await saveLease(harness.store, 'native-session-switch', current.id);
-    harness.candidateCache.set(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID), [makeCandidate('native-session-switch')]);
+    const previousActivity = new Date(Date.now() - 60_000).toISOString();
+    await saveLease(harness.store, 'native-session-switch', current.id, nativeLeaseOwner(CHANNEL_TYPE, CHAT_ID), previousActivity);
+    const cachedCandidate = makeCandidate('native-session-switch');
+    harness.candidateCache.set(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID), [cachedCandidate]);
 
     await harness.commandRouter.handle(harness.adapter, makeMessage('/session 1'));
 
-    expect(await harness.leaseService.getActive('native-session-switch')).toBeNull();
-    expect(harness.candidateCache.get(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID))).toBeNull();
-    expect((await harness.store.getBinding(CHANNEL_TYPE, CHAT_ID))?.sessionId).toBe(target.id);
+    expect(await harness.leaseService.getActive('native-session-switch')).toBeTruthy();
+    expect(harness.candidateCache.get(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID))).toEqual([cachedCandidate]);
+    expect((await harness.store.getBinding(CHANNEL_TYPE, CHAT_ID))?.sessionId).toBe(current.id);
+    expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('Usage: /resume <n|current>');
   });
 
   it('refreshes but does not release the current native lease on /stop', async () => {
@@ -740,48 +744,45 @@ describe('CommandRouter native Claude commands', () => {
     expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('No active execution');
   });
 
-  it('marks imported sessions in /sessions and falls back to nativePreview when no TLive user message exists', async () => {
-    const imported = makeImportedSession({
-      id: 'session-imported-list',
-      sdkSessionId: 'native-list',
-      nativePreview: 'native fallback preview',
-      createdAt: '2026-05-06T12:20:00.000Z',
-    });
-    const regular = makeRegularSession({
-      id: 'session-regular-list',
-      createdAt: '2026-05-06T12:10:00.000Z',
-    });
+  it('prompts Telegram users to use /session for removed native session list aliases', async () => {
     const harness = createHarness();
-    await harness.store.saveSession(imported);
-    await harness.store.saveSession(regular);
-    await harness.store.saveBinding({
-      channelType: CHANNEL_TYPE,
-      chatId: CHAT_ID,
-      sessionId: imported.id,
-      createdAt: NOW_ISO,
-    });
-    await harness.store.saveMessage(regular.id, {
-      role: 'user',
-      content: 'regular tlive user message',
-      timestamp: NOW_ISO,
-    });
 
-    await harness.commandRouter.handle(harness.adapter, makeMessage('/sessions'));
+    for (const text of ['/sessions', '/claude-sessions', '/claude_sessions', '/cs']) {
+      vi.mocked(harness.adapter.send).mockClear();
+      const handled = await harness.commandRouter.handle(harness.adapter, makeMessage(text));
 
-    const html = String(lastSend(harness.adapter)?.html ?? '');
-    expect(html).toContain('[Claude native] native fallback preview');
-    expect(html).toContain('regular tlive user message');
-    expect(html).toContain('◀');
+      expect(handled).toBe(true);
+      expect(String(lastSend(harness.adapter)?.text ?? '')).toBe('Use /session');
+    }
   });
 
-  it('includes native Claude commands in Telegram /help', async () => {
+  it('prompts Telegram users to use /resume for removed native resume aliases', async () => {
+    const harness = createHarness();
+
+    for (const text of ['/resume-claude 1', '/resume_claude 1', '/rc current']) {
+      vi.mocked(harness.adapter.send).mockClear();
+      const handled = await harness.commandRouter.handle(harness.adapter, makeMessage(text));
+
+      expect(handled).toBe(true);
+      expect(String(lastSend(harness.adapter)?.text ?? '')).toBe('Use /resume');
+    }
+  });
+
+  it('includes only /session, /resume, and /release native Claude commands in Telegram /help', async () => {
     const harness = createHarness();
 
     await harness.commandRouter.handle(harness.adapter, makeMessage('/help'));
 
     const html = String(lastSend(harness.adapter)?.html ?? '');
-    expect(html).toContain('/claude-sessions');
-    expect(html).toContain('/resume-claude');
+    expect(html).toContain('/session');
+    expect(html).toContain('/resume &lt;n|current&gt;');
     expect(html).toContain('/release');
+    expect(html).not.toContain('/sessions');
+    expect(html).not.toContain('/claude-sessions');
+    expect(html).not.toContain('/claude_sessions');
+    expect(html).not.toContain('/cs');
+    expect(html).not.toContain('/resume-claude');
+    expect(html).not.toContain('/resume_claude');
+    expect(html).not.toContain('/rc');
   });
 });

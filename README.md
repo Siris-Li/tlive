@@ -181,8 +181,9 @@ tlive hooks resume         # Resume hooks (IM approval)
 /stop                          # Interrupt execution
 /verbose 0|1                   # Detail level
 /new                           # New conversation
-/sessions                      # List sessions
-/session <n>                   # Switch to session
+/session                       # List native Claude Code sessions on Telegram
+/resume <n|current>            # Resume a native Claude Code session on Telegram
+/release                       # Release native Claude takeover on Telegram
 /hooks pause|resume            # Toggle hook approval
 /approve <code>                # Approve Telegram pairing
 /pairings                      # List pending pairings
@@ -191,8 +192,10 @@ tlive hooks resume         # Resume hooks (IM approval)
 
 ### Telegram: native Claude Code sessions
 
-- `/claude_sessions` (`/claude-sessions`, `/cs`) — list recent native Claude Code sessions from this machine.
-- `/resume_claude <n|current>` (`/resume-claude`, `/rc`) — take over a listed or current imported Claude Code session from Telegram.
+- `/session` — list five recent native Claude Code sessions from this machine.
+- `/session all` — list all native Claude Code sessions from this machine.
+- `/resume <n|current>` — take over a listed or current imported Claude Code session from Telegram.
+- `/resume <n|current> cwd "<absolute path>"` — override the working directory when resuming.
 - `/release` — release the Telegram takeover and show the desktop `claude --resume <session-id>` command.
 
 > **IM Commands:** These slash commands also appear in Telegram's native bot menu automatically.

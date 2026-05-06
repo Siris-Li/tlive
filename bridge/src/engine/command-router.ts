@@ -39,6 +39,7 @@ const TELEGRAM_ONLY_NATIVE_COMMANDS = new Set([
   '/claude-sessions',
   '/claude_sessions',
   '/cs',
+  '/resume',
   '/resume-claude',
   '/resume_claude',
   '/rc',
@@ -257,6 +258,11 @@ export class CommandRouter {
         return true;
       }
       case '/sessions': {
+        if (adapter.channelType === 'telegram') {
+          await adapter.send({ chatId: msg.chatId, text: 'Use /session' });
+          return true;
+        }
+
         const { store } = getBridgeContext();
         const allSessions = await store.listSessions();
         const binding = await this.router.resolve(msg.channelType, msg.chatId);
@@ -308,6 +314,14 @@ export class CommandRouter {
         return true;
       }
       case '/session': {
+        if (adapter.channelType === 'telegram') {
+          if (parts.length === 1 || parts[1]?.toLowerCase() === 'all') {
+            return this.handleClaudeSessions(adapter, msg, parts);
+          }
+          await adapter.send({ chatId: msg.chatId, text: this.resumeUsage() });
+          return true;
+        }
+
         const idx = parseInt(parts[1], 10);
         if (isNaN(idx) || idx < 1) {
           await adapter.send({ chatId: msg.chatId, text: 'Usage: /session <number>\nUse /sessions to list.' });
@@ -463,12 +477,17 @@ export class CommandRouter {
       case '/claude-sessions':
       case '/claude_sessions':
       case '/cs': {
-        return this.handleClaudeSessions(adapter, msg, parts);
+        await adapter.send({ chatId: msg.chatId, text: 'Use /session' });
+        return true;
+      }
+      case '/resume': {
+        return this.handleResumeClaude(adapter, msg, parts);
       }
       case '/resume-claude':
       case '/resume_claude':
       case '/rc': {
-        return this.handleResumeClaude(adapter, msg, parts);
+        await adapter.send({ chatId: msg.chatId, text: 'Use /resume' });
+        return true;
       }
       case '/release': {
         return this.handleRelease(adapter, msg);
@@ -480,12 +499,12 @@ export class CommandRouter {
             '',
             '<code>/menu</code> — ⚙️ <b>Control Panel</b> ✨',
             '<code>/new</code> — New conversation',
-            '<code>/claude_sessions</code> · <code>/claude-sessions</code> · <code>/cs</code> — Claude native session list',
-            '<code>/resume_claude &lt;n|current&gt;</code> · <code>/resume-claude</code> · <code>/rc</code> — Resume Claude native session',
+            '<code>/session</code> — Claude native session list',
+            '<code>/resume &lt;n|current&gt;</code> — Resume Claude native session',
             '<code>/release</code> — Release Claude native lease',
             '',
             '<i>Legacy (use /menu instead):</i>',
-            '<code>/sessions</code> · <code>/perm</code> · <code>/effort</code>',
+            '<code>/perm</code> · <code>/effort</code>',
             '<code>/model</code> · <code>/stop</code> · <code>/verbose</code>',
             '',
             '<code>/runtime claude|codex</code> — Switch AI provider',
@@ -699,9 +718,9 @@ export class CommandRouter {
       );
     }
 
-    const footer = ['<i>Use <code>/rc &lt;n&gt;</code> within 5 minutes to resume.</i>'];
+    const footer = ['<i>Use <code>/resume &lt;n&gt;</code> within 5 minutes to resume.</i>'];
     if (!showAll && scanned.length > displayed.length) {
-      footer.push(`<i>Showing ${displayed.length} of ${scanned.length}. Use <code>/claude_sessions all</code> to show all desktop sessions.</i>`);
+      footer.push(`<i>Showing ${displayed.length} of ${scanned.length}. Use <code>/session all</code> to show all desktop sessions.</i>`);
     }
 
     const html = [
@@ -784,7 +803,7 @@ export class CommandRouter {
         if (!cached || idx < 1 || idx > cached.length) {
           await adapter.send({
             chatId: msg.chatId,
-            text: '⚠️ Cached Claude native session list is missing, expired, or invalid. Run /claude-sessions first.',
+            text: '⚠️ Cached Claude native session list is missing, expired, or invalid. Run /session first.',
           });
           return true;
         }
@@ -795,7 +814,7 @@ export class CommandRouter {
         if (!candidate) {
           await adapter.send({
             chatId: msg.chatId,
-            text: `⚠️ Claude native session ${parsed.target} was not found. Run /claude-sessions or check the session id.`,
+            text: `⚠️ Claude native session ${parsed.target} was not found. Run /session or check the session id.`,
           });
           return true;
         }
@@ -886,7 +905,7 @@ export class CommandRouter {
     let cwdOverride: string | undefined;
     for (let i = 2; i < parts.length; i += 1) {
       const part = parts[i];
-      if (part !== '--cwd') {
+      if (part !== 'cwd') {
         return { error: this.resumeUsage() };
       }
       const value = parts[i + 1];
@@ -901,7 +920,7 @@ export class CommandRouter {
   }
 
   private resumeUsage(): string {
-    return 'Usage: /rc <n|current> [--cwd "absolute path"]';
+    return 'Usage: /resume <n|current> [cwd "absolute path"]';
   }
 
   private resolveResumeWorkingDirectory(
@@ -918,19 +937,19 @@ export class CommandRouter {
 
   private validateDirectoryOverride(cwdOverride: string): { ok: true; cwd: string } | { ok: false; error: string } {
     if (!isAbsolute(cwdOverride)) {
-      return { ok: false, error: '⚠️ --cwd must be an absolute path.' };
+      return { ok: false, error: '⚠️ cwd must be an absolute path.' };
     }
 
     if (!existsSync(cwdOverride)) {
-      return { ok: false, error: '⚠️ --cwd path does not exist.' };
+      return { ok: false, error: '⚠️ cwd path does not exist.' };
     }
 
     try {
       if (!statSync(cwdOverride).isDirectory()) {
-        return { ok: false, error: '⚠️ --cwd must point to a directory.' };
+        return { ok: false, error: '⚠️ cwd must point to a directory.' };
       }
     } catch {
-      return { ok: false, error: '⚠️ Failed to inspect the supplied --cwd path.' };
+      return { ok: false, error: '⚠️ Failed to inspect the supplied cwd path.' };
     }
 
     return { ok: true, cwd: cwdOverride };
@@ -971,20 +990,20 @@ export class CommandRouter {
     permissionsOff: boolean;
   }): string {
     const lines = [
-      '🟣 <b>Claude native session resumed</b>',
+      '🔄 <b>Claude session resumed</b>',
       '',
-      `<b>Session:</b> <code>${this.escapeHtml(this.shortSessionId(params.candidate.sessionId))}</code>`,
-      `<b>TLive session:</b> <code>${this.escapeHtml(params.tliveSessionId)}</code>`,
-      `<b>CWD:</b> <code>${this.escapeHtml(params.cwd)}</code>`,
-      `<b>Resume on desktop:</b> <code>claude --resume ${this.escapeHtml(params.candidate.sessionId)}</code>`,
+      `📁 <code>${this.escapeHtml(params.cwd)}</code>`,
+      `💻 <code>claude --resume ${this.escapeHtml(params.candidate.sessionId)}</code>`,
     ];
 
     if (params.candidate.gitBranch) {
-      lines.push(`<b>Branch:</b> <code>${this.escapeHtml(params.candidate.gitBranch)}</code>`);
+      lines.splice(3, 0, `🌿 <code>${this.escapeHtml(params.candidate.gitBranch)}</code>`);
     }
 
+    lines.push(`🕒 Lease: ${NATIVE_LEASE_TTL_MINUTES} min`);
+
     if (params.switchedToClaude) {
-      lines.push('<b>Runtime:</b> switched to Claude');
+      lines.push('Runtime: switched to Claude');
     }
 
     if (params.isolatedSettings) {
@@ -995,9 +1014,7 @@ export class CommandRouter {
       lines.push('⚠️ Permission prompts are OFF for this chat.');
     }
 
-    lines.push(`<b>Lease:</b> ${NATIVE_LEASE_TTL_MINUTES}-minute TTL`);
-    lines.push('Use <code>/release</code> when you are done.');
-    lines.push('Do not type concurrently in Claude desktop while this lease is active.');
+    lines.push('Use <code>/release</code> when done.');
 
     return lines.join('\n');
   }

@@ -19,7 +19,7 @@ export type { HookNotificationData } from './hook-engine.js';
 import { networkInterfaces } from 'node:os';
 
 /** Bridge commands handled synchronously (don't block adapter loop) */
-const QUICK_COMMANDS = new Set(['/menu', '/new', '/status', '/verbose', '/hooks', '/sessions', '/session', '/help', '/perm', '/effort', '/stop', '/approve', '/pairings', '/runtime', '/settings', '/model', '/claude-sessions', '/cs', '/resume-claude', '/rc', '/release']);
+const QUICK_COMMANDS = new Set(['/menu', '/new', '/status', '/verbose', '/hooks', '/sessions', '/session', '/help', '/perm', '/effort', '/stop', '/approve', '/pairings', '/runtime', '/settings', '/model', '/claude-sessions', '/claude_sessions', '/cs', '/resume', '/resume-claude', '/resume_claude', '/rc', '/release']);
 
 function isPrivateIPv4(ip: string): boolean {
   const parts = ip.split('.').map(Number);

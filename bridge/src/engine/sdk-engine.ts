@@ -387,14 +387,14 @@ export class SDKEngine {
     if (refresh.status === 'blocked') {
       await adapter.send({
         chatId: msg.chatId,
-        text: `This native Claude session is currently owned by ${maskLeaseOwner(refresh.lease.owner)}. Use /claude-sessions to choose another session.`,
+        text: `This native Claude session is currently owned by ${maskLeaseOwner(refresh.lease.owner)}. Use /session to choose another session.`,
       });
       return false;
     }
 
     await adapter.send({
       chatId: msg.chatId,
-      text: 'This native Claude session has been released or expired. Run /resume-claude current (or /rc current) to take it over again, or /new to start fresh.',
+      text: 'This native Claude session has been released or expired. Run /resume current to take it over again, or /new to start fresh.',
     });
     return false;
   }

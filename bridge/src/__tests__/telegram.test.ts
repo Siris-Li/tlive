@@ -225,18 +225,24 @@ describe('TelegramAdapter', () => {
   });
 
   describe('start()', () => {
-    it('registers native Claude commands with Telegram-compatible menu names', async () => {
+    it('registers /session and /resume native Claude commands in the Telegram menu', async () => {
       await adapter.start();
       expect(mockGetMe).toHaveBeenCalled();
       expect(mockSetMyCommands).toHaveBeenCalled();
       const commands = mockSetMyCommands.mock.calls.at(-1)?.[0] ?? [];
       expect(commands).toEqual(expect.arrayContaining([
-        { command: 'claude_sessions', description: 'List native Claude sessions' },
-        { command: 'resume_claude', description: 'Resume native Claude session' },
+        { command: 'session', description: 'List native Claude sessions' },
+        { command: 'resume', description: 'Resume native Claude session' },
         { command: 'release', description: 'Release native Claude takeover' },
       ]));
-      expect(commands.map((entry: { command: string }) => entry.command)).not.toContain('claude-sessions');
-      expect(commands.map((entry: { command: string }) => entry.command)).not.toContain('resume-claude');
+      const commandNames = commands.map((entry: { command: string }) => entry.command);
+      expect(commandNames).not.toContain('sessions');
+      expect(commandNames).not.toContain('claude_sessions');
+      expect(commandNames).not.toContain('resume_claude');
+      expect(commandNames).not.toContain('claude-sessions');
+      expect(commandNames).not.toContain('resume-claude');
+      expect(commandNames).not.toContain('cs');
+      expect(commandNames).not.toContain('rc');
     });
 
     it('installs throttler', async () => {

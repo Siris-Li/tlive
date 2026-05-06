@@ -285,8 +285,9 @@ describe('SDKEngine native imported session guard', () => {
 
     await expect(harness.engine.handleMessage(harness.adapter, makeMessage(), harness.provider)).resolves.toBe(true);
 
-    expect(lastSentText(harness.adapter)).toContain('/resume-claude current');
-    expect(lastSentText(harness.adapter)).toContain('/rc current');
+    expect(lastSentText(harness.adapter)).toContain('/resume current');
+    expect(lastSentText(harness.adapter)).not.toContain('/resume-claude');
+    expect(lastSentText(harness.adapter)).not.toContain('/rc current');
     expect(harness.store.saveMessage).not.toHaveBeenCalled();
     expect(harness.adapter.sendTyping).not.toHaveBeenCalled();
     expect(harness.adapter.addReaction).not.toHaveBeenCalled();
@@ -421,7 +422,9 @@ describe('SDKEngine native imported session guard', () => {
 
     await expect(harness.engine.handleMessage(harness.adapter, makeMessage(), harness.provider)).resolves.toBe(true);
 
-    expect(lastSentText(harness.adapter)).toContain('/resume-claude current');
+    expect(lastSentText(harness.adapter)).toContain('/resume current');
+    expect(lastSentText(harness.adapter)).not.toContain('/resume-claude');
+    expect(lastSentText(harness.adapter)).not.toContain('/rc current');
     expect(harness.store.saveBinding).not.toHaveBeenCalled();
     expect(harness.store.saveMessage).not.toHaveBeenCalled();
     expect(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID)).toBe(chatKey);
