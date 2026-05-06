@@ -369,7 +369,8 @@ describe('CommandRouter native Claude commands', () => {
     await harness.commandRouter.handle(harness.adapter, makeMessage('/cs'));
 
     const html = String(lastSend(harness.adapter)?.html ?? '');
-    expect(html).toContain('Claude Code history sessions');
+    expect(html).toContain('📋 Claude Code history sessions');
+    expect(html).not.toContain('🟣 Claude Code history sessions');
     expect(html).toContain('🔒 yours');
     expect(html).toContain('⚠️ cwd unknown');
     expect(html).toContain('📁 <code>C:\\repo</code>');
@@ -407,6 +408,7 @@ describe('CommandRouter native Claude commands', () => {
     const html = String(lastSend(harness.adapter)?.html ?? '');
     expect(html).toContain('preview-1');
     expect(html).toContain('preview-5');
+    expect(html).toContain('💬 preview-1\n\n2. 🕒');
     expect(html).not.toContain('preview-6');
     expect(html).toContain('Showing 5 of 7');
     expect(html).toContain('/claude_sessions all');

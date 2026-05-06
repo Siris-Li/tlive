@@ -705,9 +705,9 @@ export class CommandRouter {
     }
 
     const html = [
-      '<b>🟣 Claude Code history sessions</b>',
+      '<b>📋 Claude Code history sessions</b>',
       '',
-      lines.join('\n'),
+      lines.join('\n\n'),
       '',
       footer.join('\n'),
     ].join('\n');
