@@ -117,7 +117,7 @@ export function loadConfig(): Config {
     publicUrl: get('TL_PUBLIC_URL'),
     enabledChannels: parseList(get('TL_ENABLED_CHANNELS')),
     runtime: (get('TL_RUNTIME', 'claude') as Config['runtime']),
-    claudeSettingSources: parseList(get('TL_CLAUDE_SETTINGS', 'user')) as ClaudeSettingSource[],
+    claudeSettingSources: parseList(get('TL_CLAUDE_SETTINGS', 'user,project,local')) as ClaudeSettingSource[],
     proxy: globalProxy,
     defaultWorkdir: get('TL_DEFAULT_WORKDIR', process.cwd()),
     defaultModel: get('TL_DEFAULT_MODEL'),

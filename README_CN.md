@@ -235,6 +235,10 @@ TL_DC_BOT_TOKEN=...
 TL_FS_APP_ID=...
 TL_FS_APP_SECRET=...
 
+# Claude Code 配置加载范围（默认 full）
+# full = 用户 + 项目 + 本地配置 · user = 仅认证/模型 · isolated = 不加载
+TL_CLAUDE_SETTINGS=user,project,local
+
 # 代理（适用于无法直连 Telegram/Discord 的地区）
 # TL_PROXY=http://127.0.0.1:7890
 ```

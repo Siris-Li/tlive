@@ -89,7 +89,7 @@ chmod 600 ~/.tlive/config.env
 
 ### Claude Code 配置加载
 
-`TL_CLAUDE_SETTINGS` 控制加载哪些 Claude Code 配置文件，默认值为 `user`。
+`TL_CLAUDE_SETTINGS` 控制加载哪些 Claude Code 配置文件，默认值为 `user,project,local`（接近桌面端完整上下文）。
 
 | 值 | 加载内容 | 用途 |
 |----|---------|------|
@@ -98,12 +98,12 @@ chmod 600 ~/.tlive/config.env
 | `local` | `.claude/settings.local.json` | 开发者覆盖 |
 
 ```env
-TL_CLAUDE_SETTINGS=user            # 默认 — 只加载用户配置
-TL_CLAUDE_SETTINGS=user,project    # 用户 + 项目配置
-TL_CLAUDE_SETTINGS=                # 完全隔离
+TL_CLAUDE_SETTINGS=user,project,local  # 默认 — 接近桌面端完整上下文
+TL_CLAUDE_SETTINGS=user                # 仅用户配置
+TL_CLAUDE_SETTINGS=                    # 完全隔离
 ```
 
-> **提示：** 如果你使用 **ccswitch** 等工具在 `~/.claude/settings.json` 中配置了 `ANTHROPIC_AUTH_TOKEN` / `ANTHROPIC_BASE_URL`，默认的 `user` 设置已经会读取，无需额外配置。
+> **提示：** 如果你只想加载全局认证/模型配置，不加载项目 `CLAUDE.md`、MCP 或 skills，请设置 `TL_CLAUDE_SETTINGS=user`。
 
 ## 安装 Claude Code 集成
 

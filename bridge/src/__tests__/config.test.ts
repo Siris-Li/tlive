@@ -34,6 +34,7 @@ describe('loadConfig', () => {
     expect(config.port).toBe(4590);
     expect(config.runtime).toBe('claude');
     expect(config.coreUrl).toBe('http://localhost:4590');
+    expect(config.claudeSettingSources).toEqual(['user', 'project', 'local']);
   });
 
   it('loads from env vars', () => {

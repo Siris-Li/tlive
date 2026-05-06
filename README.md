@@ -258,9 +258,9 @@ TL_DC_BOT_TOKEN=...
 TL_FS_APP_ID=...
 TL_FS_APP_SECRET=...
 
-# Claude Code settings scope (default: user)
-# user = auth/model only · full = +CLAUDE.md/MCP/skills · isolated = none
-TL_CLAUDE_SETTINGS=user
+# Claude Code settings scope (default: full)
+# full = user + project + local · user = auth/model only · isolated = none
+TL_CLAUDE_SETTINGS=user,project,local
 ```
 
 See [config.env.example](config.env.example) for all options.
