@@ -305,6 +305,51 @@ afterEach(() => {
 });
 
 describe('CommandRouter native Claude commands', () => {
+  it('shows the resume working directory instead of JSONL identifiers in /claude_sessions results', async () => {
+    const candidate = makeCandidate('native-display', {
+      sourcePath: 'C:\\history\\native-display.jsonl',
+      cwd: undefined,
+      cwdSource: 'unknown',
+      cwdExists: false,
+      gitBranch: undefined,
+    });
+    const harness = createHarness({
+      scanNativeSessions: async () => [candidate],
+    });
+
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/claude_sessions'));
+
+    const html = String(lastSend(harness.adapter)?.html ?? '');
+    expect(html).toContain('C:\\repo');
+    expect(html).not.toContain('native-display.jsonl');
+    expect(html).not.toContain('C:\\history');
+    expect(html).not.toContain('native-display</code>');
+  });
+
+  it('uses an existing imported session working directory as the /claude_sessions resume path', async () => {
+    const imported = makeImportedSession({
+      sdkSessionId: 'native-existing-display',
+      workingDirectory: 'D:\\stable\\repo',
+    });
+    const candidate = makeCandidate('native-existing-display', {
+      sourcePath: 'C:\\history\\native-existing-display.jsonl',
+      cwd: 'D:\\old-worktree\\repo',
+      cwdSource: 'jsonl',
+      cwdExists: true,
+    });
+    const harness = createHarness({
+      scanNativeSessions: async () => [candidate],
+    });
+    await harness.store.saveSession(imported);
+
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/claude_sessions'));
+
+    const html = String(lastSend(harness.adapter)?.html ?? '');
+    expect(html).toContain('D:\\stable\\repo');
+    expect(html).not.toContain('D:\\old-worktree\\repo');
+    expect(html).not.toContain('native-existing-display.jsonl');
+  });
+
   it('formats /cs results, caches candidates, and supports /claude-sessions and /claude_sessions aliases', async () => {
     const imported = makeImportedSession({ sdkSessionId: 'native-1' });
     const candidate = makeCandidate('native-1', {
@@ -318,7 +363,8 @@ describe('CommandRouter native Claude commands', () => {
       scanNativeSessions: async () => [candidate],
     });
     await bindCurrentImportedSession(harness.store, imported);
-    await saveLease(harness.store, 'native-1', imported.id);
+    const previousActivity = new Date(Date.now() - 60_000).toISOString();
+    await saveLease(harness.store, 'native-1', imported.id, nativeLeaseOwner(CHANNEL_TYPE, CHAT_ID), previousActivity);
 
     await harness.commandRouter.handle(harness.adapter, makeMessage('/cs'));
 
@@ -326,7 +372,7 @@ describe('CommandRouter native Claude commands', () => {
     expect(html).toContain('Claude Code history sessions');
     expect(html).toContain('locked by you');
     expect(html).toContain('cwd unknown');
-    expect(html).toContain('C:\\history\\native-1.jsonl');
+    expect(html).not.toContain('C:\\history\\native-1.jsonl');
     expect(html).toContain('imported');
     expect(html).toContain('feature/native');
     expect(html).toContain('/rc &lt;n&gt;');
@@ -472,10 +518,29 @@ describe('CommandRouter native Claude commands', () => {
     const rebound = await harness.store.getBinding(CHANNEL_TYPE, CHAT_ID);
     const session = await harness.store.getSession(existing.id);
     expect(rebound?.sessionId).toBe(existing.id);
-    expect(session?.workingDirectory).toBe(candidate.cwd);
+    expect(session?.workingDirectory).toBe(existing.workingDirectory);
   });
 
-  it('rejects resume when the candidate cwd is missing and no override is supplied', async () => {
+  it('uses the default workdir when resuming a candidate with no cwd', async () => {
+    const candidate = makeCandidate('native-default-cwd', {
+      cwd: undefined,
+      cwdSource: 'unknown',
+      cwdExists: false,
+    });
+    const harness = createHarness({
+      scanNativeSessions: async () => [candidate],
+    });
+
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/cs'));
+    vi.mocked(harness.adapter.send).mockClear();
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/rc 1'));
+
+    const resumed = (await harness.store.listSessions()).find(session => session.sdkSessionId === 'native-default-cwd');
+    expect(resumed?.workingDirectory).toBe('C:\\repo');
+    expect(String(vi.mocked(harness.adapter.send).mock.calls[0]?.[0]?.html ?? '')).toContain('C:\\repo');
+  });
+
+  it('uses the default workdir when the candidate cwd is missing and no override is supplied', async () => {
     const candidate = makeCandidate('native-missing', {
       cwd: 'C:\\missing-path',
       cwdExists: false,
@@ -488,8 +553,11 @@ describe('CommandRouter native Claude commands', () => {
     vi.mocked(harness.adapter.send).mockClear();
     await harness.commandRouter.handle(harness.adapter, makeMessage('/rc 1'));
 
-    expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('--cwd');
-    expect(await harness.leaseService.getActive('native-missing')).toBeNull();
+    const resumed = (await harness.store.listSessions()).find(session => session.sdkSessionId === 'native-missing');
+    expect(resumed?.workingDirectory).toBe('C:\\missing-path');
+    expect(await harness.leaseService.getActive('native-missing')).toEqual(
+      expect.objectContaining({ owner: nativeLeaseOwner(CHANNEL_TYPE, CHAT_ID) }),
+    );
   });
 
   it('accepts a quoted absolute --cwd override with spaces and updates the imported session cwd', async () => {
@@ -617,13 +685,14 @@ describe('CommandRouter native Claude commands', () => {
     const current = makeImportedSession({ id: 'session-imported-stop', sdkSessionId: 'native-stop' });
     const harness = createHarness();
     await bindCurrentImportedSession(harness.store, current);
-    await saveLease(harness.store, 'native-stop', current.id, nativeLeaseOwner(CHANNEL_TYPE, CHAT_ID), '2026-05-06T11:00:00.000Z');
+    const previousActivity = new Date(Date.now() - 60_000).toISOString();
+    await saveLease(harness.store, 'native-stop', current.id, nativeLeaseOwner(CHANNEL_TYPE, CHAT_ID), previousActivity);
 
     await harness.commandRouter.handle(harness.adapter, makeMessage('/stop'));
 
     const lease = await harness.leaseService.getActive('native-stop');
     expect(lease).toBeTruthy();
-    expect(lease?.lastActiveAt).not.toBe('2026-05-06T11:00:00.000Z');
+    expect(lease?.lastActiveAt).not.toBe(previousActivity);
     expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('No active execution');
   });
 

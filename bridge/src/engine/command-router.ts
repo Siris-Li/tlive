@@ -23,7 +23,7 @@ import { renderRecentContextPages } from '../native/recent-context.js';
 import { importClaudeNativeSession } from '../native/claude-session-importer.js';
 import { NativeCommandCandidateCache } from './native-command-cache.js';
 import { existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { ChannelBinding, NativeSessionLease, SessionData } from '../store/interface.js';
 
@@ -614,6 +614,13 @@ export class CommandRouter {
     return this.nativeDeps?.candidateCache ?? this.fallbackCandidateCache;
   }
 
+  private async findImportedSession(sdkSessionId: string): Promise<SessionData | undefined> {
+    const { store } = getBridgeContext();
+    return (await store.listSessions()).find(session =>
+      session.source === 'claude-native' && session.sdkSessionId === sdkSessionId,
+    );
+  }
+
   private async getCurrentImportedBinding(channelType: string, chatId: string): Promise<{
     binding: ChannelBinding;
     session: SessionData;
@@ -667,25 +674,25 @@ export class CommandRouter {
       return true;
     }
 
-    const importedSessionIds = new Set(
+    const importedSessionsBySdkId = new Map(
       (await store.listSessions())
         .filter(session => session.source === 'claude-native' && session.sdkSessionId)
-        .map(session => session.sdkSessionId as string),
+        .map(session => [session.sdkSessionId as string, session]),
     );
 
     const lines: string[] = [];
     for (let i = 0; i < scanned.length; i += 1) {
       const candidate = scanned[i];
+      const importedSession = importedSessionsBySdkId.get(candidate.sessionId);
       const lease = await leaseService.getActive(candidate.sessionId);
-      const markers = this.buildCandidateMarkers(candidate, lease, owner, importedSessionIds.has(candidate.sessionId));
-      const displayId = basename(candidate.sourcePath) || this.shortSessionId(candidate.sessionId);
+      const markers = this.buildCandidateMarkers(candidate, lease, owner, importedSession !== undefined);
       const preview = candidate.nativePreview || candidate.preview || EMPTY_PREVIEW;
-      const location = candidate.cwd ?? candidate.sourcePath;
+      const resumeCwd = this.resolveDefaultResumeWorkingDirectory(candidate, importedSession?.workingDirectory);
       const date = this.formatShortDate(candidate.lastActivityAt);
       const markerSuffix = markers.length > 0 ? ` · <i>${this.escapeHtml(markers.join(' · '))}</i>` : '';
       lines.push(
-        `${i + 1}. <code>${this.escapeHtml(displayId)}</code> · <code>${this.escapeHtml(this.shortSessionId(candidate.sessionId))}</code> · ${this.escapeHtml(date)}${markerSuffix}\n` +
-        `   <code>${this.escapeHtml(location)}</code>\n` +
+        `${i + 1}. ${this.escapeHtml(date)}${markerSuffix}\n` +
+        `   <code>${this.escapeHtml(resumeCwd)}</code>\n` +
         `   ${this.escapeHtml(preview)}`,
       );
     }
@@ -728,6 +735,10 @@ export class CommandRouter {
     }
 
     return markers;
+  }
+
+  private resolveDefaultResumeWorkingDirectory(candidate: ClaudeNativeSessionCandidate, existingWorkingDirectory?: string): string {
+    return existingWorkingDirectory || candidate.cwd || getBridgeContext().defaultWorkdir;
   }
 
   private async handleResumeClaude(
@@ -789,6 +800,7 @@ export class CommandRouter {
       }
     }
 
+    const existingImported = await this.findImportedSession(candidate.sessionId);
     const activeLease = await leaseService.getActive(candidate.sessionId);
     if (activeLease && activeLease.owner !== owner) {
       await adapter.send({
@@ -798,14 +810,14 @@ export class CommandRouter {
       return true;
     }
 
-    const cwdValidation = this.resolveResumeWorkingDirectory(candidate, parsed.cwdOverride);
+    const cwdValidation = this.resolveResumeWorkingDirectory(candidate, parsed.cwdOverride, existingImported?.workingDirectory);
     if (!cwdValidation.ok || !cwdValidation.cwd) {
       await adapter.send({ chatId: msg.chatId, text: cwdValidation.error ?? this.resumeUsage() });
       return true;
     }
 
     const importedSession = await importClaudeNativeSession(store, candidate, {
-      cwdOverride: cwdValidation.cwd !== candidate.cwd ? cwdValidation.cwd : undefined,
+      cwdOverride: cwdValidation.cwd,
     });
     const acquired = await leaseService.acquire({
       sdkSessionId: candidate.sessionId,
@@ -893,20 +905,13 @@ export class CommandRouter {
   private resolveResumeWorkingDirectory(
     candidate: ClaudeNativeSessionCandidate,
     cwdOverride?: string,
+    existingWorkingDirectory?: string,
   ): { ok: true; cwd: string } | { ok: false; error: string } {
     if (cwdOverride) {
       return this.validateDirectoryOverride(cwdOverride);
     }
 
-    if (!candidate.cwd || candidate.cwdSource === 'unknown') {
-      return { ok: false, error: '⚠️ This Claude native session has unknown working directory. Re-run with --cwd "absolute path".' };
-    }
-
-    if (!candidate.cwdExists) {
-      return { ok: false, error: '⚠️ The original Claude native working directory no longer exists. Re-run with --cwd "absolute path".' };
-    }
-
-    return { ok: true, cwd: candidate.cwd };
+    return { ok: true, cwd: this.resolveDefaultResumeWorkingDirectory(candidate, existingWorkingDirectory) };
   }
 
   private validateDirectoryOverride(cwdOverride: string): { ok: true; cwd: string } | { ok: false; error: string } {
