@@ -189,6 +189,12 @@ tlive hooks resume         # Resume hooks (IM approval)
 /help                          # Show all commands
 ```
 
+### Telegram: native Claude Code sessions
+
+- `/claude-sessions` (`/cs`) — list recent native Claude Code sessions from this machine.
+- `/resume-claude <n|current>` (`/rc`) — take over a listed or current imported Claude Code session from Telegram.
+- `/release` — release the Telegram takeover and show the desktop `claude --resume <session-id>` command.
+
 > **IM Commands:** These slash commands also appear in Telegram's native bot menu automatically.
 
 ## Configuration

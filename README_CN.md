@@ -180,6 +180,12 @@ tlive hooks resume         # 恢复 Hook（IM 审批）
 /help                          # 显示所有命令
 ```
 
+### Telegram：接续原生 Claude Code 会话
+
+- `/claude-sessions`（`/cs`）— 列出本机最近的原生 Claude Code 会话。
+- `/resume-claude <n|current>`（`/rc`）— 在 Telegram 接管列表中的会话，或重新接管当前已导入会话。
+- `/release` — 释放 Telegram 接管，并显示桌面端 `claude --resume <session-id>` 命令。
+
 ## 配置
 
 统一配置文件 `~/.tlive/config.env`（由 `tlive setup` 创建）：

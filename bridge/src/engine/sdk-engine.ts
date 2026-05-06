@@ -5,6 +5,7 @@ import type { PermissionCoordinator } from './permission-coordinator.js';
 import type { SessionStateManager } from './session-state.js';
 import type { ChannelRouter } from './router.js';
 import type { SdkQuestionState } from './callback-router.js';
+import type { SessionData } from '../store/interface.js';
 import { ConversationEngine } from './conversation.js';
 import { MessageRenderer } from './message-renderer.js';
 import { CostTracker } from './cost-tracker.js';
@@ -15,6 +16,7 @@ import { downgradeHeadings } from '../markdown/feishu.js';
 import { chunkByParagraph } from '../delivery/delivery.js';
 import type { FeishuStreamingSession } from '../channels/feishu-streaming.js';
 import { getBridgeContext } from '../context.js';
+import { NativeSessionLeaseService, maskLeaseOwner, nativeLeaseOwner } from '../native/native-session-lease.js';
 
 /** Managed session — wraps a LiveSession with per-chat metadata */
 interface ManagedSession {
@@ -204,6 +206,20 @@ export class SDKEngine {
     return this.activeControls;
   }
 
+  /** Return whether this chat is currently processing or has an active LiveSession turn. */
+  isChatActive(channelType: string, chatId: string): boolean {
+    const chatKey = this.state.stateKey(channelType, chatId);
+    if (this.state.isProcessing(chatKey)) return true;
+
+    const prefix = `${channelType}:${chatId}:`;
+    for (const [key, managed] of this.registry) {
+      if (key.startsWith(prefix) && managed.session.isTurnActive) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /** Expose cost tracker for a given chat (used by ControlPanel stats) */
   getCostTracker(channelType: string, chatId: string): CostTracker | null {
     const stateKey = `${channelType}:${chatId}`;
@@ -331,6 +347,78 @@ export class SDKEngine {
     return answerLabel;
   }
 
+  private nativeLeaseOwner(channelType: string, chatId: string): string {
+    return nativeLeaseOwner(channelType, chatId);
+  }
+
+  private startNativeLeaseHeartbeat(session: SessionData | null, channelType: string, chatId: string): ReturnType<typeof setInterval> | null {
+    if (!this.isNativeImportedSession(session)) {
+      return null;
+    }
+
+    return setInterval(() => {
+      this.refreshOwnedNativeLease(session, channelType, chatId).catch(err => {
+        console.warn('[tlive:engine] Failed to heartbeat native session lease:', err);
+      });
+    }, 5 * 60 * 1000);
+  }
+
+  private isNativeImportedSession(session: SessionData | null | undefined): session is SessionData & { sdkSessionId: string } {
+    return session?.source === 'claude-native' && !!session.sdkSessionId;
+  }
+
+  private async guardNativeImportedSession(
+    adapter: BaseChannelAdapter,
+    msg: InboundMessage,
+    session: SessionData | null,
+  ): Promise<boolean> {
+    if (!this.isNativeImportedSession(session)) {
+      return true;
+    }
+
+    const { store } = getBridgeContext();
+    const owner = this.nativeLeaseOwner(msg.channelType, msg.chatId);
+    const refresh = await new NativeSessionLeaseService(store).refresh(session.sdkSessionId, owner);
+
+    if (refresh.status === 'refreshed') {
+      return true;
+    }
+
+    if (refresh.status === 'blocked') {
+      await adapter.send({
+        chatId: msg.chatId,
+        text: `This native Claude session is currently owned by ${maskLeaseOwner(refresh.lease.owner)}. Use /claude-sessions to choose another session.`,
+      });
+      return false;
+    }
+
+    await adapter.send({
+      chatId: msg.chatId,
+      text: 'This native Claude session has been released or expired. Run /resume-claude current (or /rc current) to take it over again, or /new to start fresh.',
+    });
+    return false;
+  }
+
+  private async refreshOwnedNativeLease(session: SessionData | null, channelType: string, chatId: string): Promise<void> {
+    if (!this.isNativeImportedSession(session)) {
+      return;
+    }
+
+    const { store } = getBridgeContext();
+    const owner = this.nativeLeaseOwner(channelType, chatId);
+    await new NativeSessionLeaseService(store).refresh(session.sdkSessionId, owner);
+  }
+
+  private async releaseOwnedNativeLease(session: SessionData | null, channelType: string, chatId: string): Promise<void> {
+    if (!this.isNativeImportedSession(session)) {
+      return;
+    }
+
+    const { store } = getBridgeContext();
+    const owner = this.nativeLeaseOwner(channelType, chatId);
+    await new NativeSessionLeaseService(store).release(session.sdkSessionId, owner);
+  }
+
   // ── Main Turn Handler ──
 
   /** Run a full SDK conversation turn */
@@ -339,23 +427,27 @@ export class SDKEngine {
     msg: InboundMessage,
     provider: LLMProvider,
   ): Promise<boolean> {
-    // Check for session expiry (>30 min inactivity) and auto-create new session
-    const expired = this.state.checkAndUpdateLastActive(msg.channelType, msg.chatId);
-    if (expired) {
-      this.closeSession(msg.channelType, msg.chatId);
-
-      const newSessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-      await this.router.rebind(msg.channelType, msg.chatId, newSessionId);
-      this.state.clearThread(msg.channelType, msg.chatId);
-      this.permissions.clearSessionWhitelist();
-    }
-
-    const binding = await this.router.resolve(msg.channelType, msg.chatId);
+    let binding = await this.router.resolve(msg.channelType, msg.chatId);
     const chatKey = this.state.stateKey(msg.channelType, msg.chatId);
 
     // Resolve working directory
     const { store, defaultWorkdir } = getBridgeContext();
-    const session = await store.getSession(binding.sessionId);
+    let session = await store.getSession(binding.sessionId);
+
+    const expired = this.state.checkAndUpdateLastActive(msg.channelType, msg.chatId);
+    if (expired && !this.isNativeImportedSession(session)) {
+      this.closeSession(msg.channelType, msg.chatId);
+
+      const newSessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      binding = await this.router.rebind(msg.channelType, msg.chatId, newSessionId);
+      this.state.clearThread(msg.channelType, msg.chatId);
+      this.permissions.clearSessionWhitelist();
+      session = await store.getSession(binding.sessionId);
+    }
+
+    if (!await this.guardNativeImportedSession(adapter, msg, session)) {
+      return true;
+    }
     const workdir = session?.workingDirectory ?? defaultWorkdir;
 
     // Resolve threadId
@@ -476,6 +568,8 @@ export class SDKEngine {
 
     let completedStats: UsageStats | undefined;
     let askQuestionApproved = false;
+    let canonicalError: string | undefined;
+    const nativeLeaseHeartbeat = this.startNativeLeaseHeartbeat(session, msg.channelType, msg.chatId);
     const caps = provider.capabilities();
 
     // Build SDK-level permission handler
@@ -538,21 +632,21 @@ export class SDKEngine {
     );
 
     let streamResult;
-    if (managed) {
-      // LiveSession mode — start a new turn
-      managed.lastActiveAt = Date.now();
-      managed.costTracker.start();
-      streamResult = managed.session.startTurn(msg.text, {
-        onPermissionRequest: sdkPermissionHandler,
-        onAskUserQuestion: sdkAskQuestionHandler,
-        effort: this.state.getEffort(msg.channelType, msg.chatId),
-        model: this.state.getModel(msg.channelType, msg.chatId),
-        attachments: msg.attachments,
-      });
-    }
-    // else: streamResult is undefined → ConversationEngine falls back to streamChat()
-
     try {
+      if (managed) {
+        // LiveSession mode — start a new turn
+        managed.lastActiveAt = Date.now();
+        managed.costTracker.start();
+        streamResult = managed.session.startTurn(msg.text, {
+          onPermissionRequest: sdkPermissionHandler,
+          onAskUserQuestion: sdkAskQuestionHandler,
+          effort: this.state.getEffort(msg.channelType, msg.chatId),
+          model: this.state.getModel(msg.channelType, msg.chatId),
+          attachments: msg.attachments,
+        });
+      }
+      // else: streamResult is undefined → ConversationEngine falls back to streamChat()
+
       const result = await this.engine.processMessage({
         sessionId: binding.sessionId,
         text: msg.text,
@@ -593,6 +687,9 @@ export class SDKEngine {
           }
         },
         onQueryResult: (event) => {
+          if (event.isError) {
+            canonicalError = 'Claude query failed';
+          }
           if (event.permissionDenials?.length) {
             console.warn(`[tlive:engine] Permission denials: ${event.permissionDenials.map(d => d.toolName).join(', ')}`);
           }
@@ -611,14 +708,38 @@ export class SDKEngine {
             buttons: [{ label: '💡 ' + truncated, callbackData: `suggest:${suggestion.slice(0, 200)}`, style: 'default' as const }],
           }).catch(() => {});
         },
-        onError: (err) => renderer.onError(err),
+        onError: (err) => {
+          canonicalError = err;
+          renderer.onError(err);
+        },
       });
 
-      adapter.addReaction(reactionChatId, msg.messageId, reactions.done).catch(() => {});
+      if (canonicalError) {
+        try {
+          await this.releaseOwnedNativeLease(session, msg.channelType, msg.chatId);
+        } catch (releaseErr) {
+          console.warn('[tlive:engine] Failed to release native session lease after canonical error:', releaseErr);
+        }
+      } else {
+        try {
+          await this.refreshOwnedNativeLease(session, msg.channelType, msg.chatId);
+        } catch (refreshErr) {
+          console.warn('[tlive:engine] Failed to refresh native session lease after turn:', refreshErr);
+        }
+      }
+      adapter.addReaction(reactionChatId, msg.messageId, canonicalError ? reactions.error : reactions.done).catch(() => {});
     } catch (err) {
+      try {
+        await this.releaseOwnedNativeLease(session, msg.channelType, msg.chatId);
+      } catch (releaseErr) {
+        console.warn('[tlive:engine] Failed to release native session lease after turn error:', releaseErr);
+      }
       adapter.addReaction(reactionChatId, msg.messageId, reactions.error).catch(() => {});
       throw err;
     } finally {
+      if (nativeLeaseHeartbeat) {
+        clearInterval(nativeLeaseHeartbeat);
+      }
       clearInterval(typingInterval);
       renderer.dispose();
       this.activeControls.delete(chatKey);

@@ -19,7 +19,7 @@ export type { HookNotificationData } from './hook-engine.js';
 import { networkInterfaces } from 'node:os';
 
 /** Bridge commands handled synchronously (don't block adapter loop) */
-const QUICK_COMMANDS = new Set(['/menu', '/new', '/status', '/verbose', '/hooks', '/sessions', '/session', '/help', '/perm', '/effort', '/stop', '/approve', '/pairings', '/runtime', '/settings', '/model']);
+const QUICK_COMMANDS = new Set(['/menu', '/new', '/status', '/verbose', '/hooks', '/sessions', '/session', '/help', '/perm', '/effort', '/stop', '/approve', '/pairings', '/runtime', '/settings', '/model', '/claude-sessions', '/cs', '/resume-claude', '/rc', '/release']);
 
 function isPrivateIPv4(ip: string): boolean {
   const parts = ip.split('.').map(Number);
@@ -86,6 +86,10 @@ export class BridgeManager {
       this.sdkEngine.getActiveControls(),
       this.permissions,
       (channelType, chatId) => this.sdkEngine.closeSession(channelType, chatId),
+      {
+        isChatActive: (channelType, chatId) =>
+          (this.sdkEngine as unknown as { isChatActive?: (channelType: string, chatId: string) => boolean }).isChatActive?.(channelType, chatId) ?? false,
+      },
     );
     this.callbackRouter = new CallbackRouter(
       this.permissions,

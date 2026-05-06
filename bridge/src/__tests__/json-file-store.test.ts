@@ -38,6 +38,47 @@ describe('JsonFileStore', () => {
     expect(await store.getSession('s1')).toBeNull();
   });
 
+  // Native session leases
+  it('saves, lists, retrieves, and deletes a native session lease', async () => {
+    const lease = {
+      sdkSessionId: 'sdk-1',
+      owner: 'alice',
+      ownerUserId: 'u-123',
+      tliveSessionId: 'tlive-1',
+      lockedAt: '2026-05-06T10:00:00.000Z',
+      lastActiveAt: '2026-05-06T10:05:00.000Z',
+      ttlMinutes: 30,
+    };
+
+    await store.saveNativeSessionLease(lease);
+
+    expect(await store.getNativeSessionLease('sdk-1')).toEqual(lease);
+    expect(await store.listNativeSessionLeases()).toEqual([lease]);
+
+    await store.deleteNativeSessionLease('sdk-1');
+
+    expect(await store.getNativeSessionLease('sdk-1')).toBeNull();
+    expect(await store.listNativeSessionLeases()).toEqual([]);
+  });
+
+  it('persists native session leases across store instances', async () => {
+    const lease = {
+      sdkSessionId: 'sdk-2',
+      owner: 'bob',
+      tliveSessionId: 'tlive-2',
+      lockedAt: '2026-05-06T11:00:00.000Z',
+      lastActiveAt: '2026-05-06T11:10:00.000Z',
+      ttlMinutes: 45,
+    };
+
+    await store.saveNativeSessionLease(lease);
+
+    const reloadedStore = new JsonFileStore(tmpDir);
+
+    expect(await reloadedStore.getNativeSessionLease('sdk-2')).toEqual(lease);
+    expect(await reloadedStore.listNativeSessionLeases()).toEqual([lease]);
+  });
+
   // Messages
   it('saves and retrieves messages', async () => {
     await store.saveMessage('s1', { role: 'user', content: 'hello', timestamp: '' });
