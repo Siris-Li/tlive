@@ -389,6 +389,44 @@ describe('CommandRouter native Claude commands', () => {
     expect(String(lastSend(harness.adapter)?.html ?? '')).toContain('Claude Code history sessions');
   });
 
+  it('shows only five native sessions by default and caches those five', async () => {
+    const candidates = Array.from({ length: 7 }, (_, index) => makeCandidate(`native-limit-${index + 1}`, {
+      cwd: `C:\\repo-${index + 1}`,
+      nativePreview: `preview-${index + 1}`,
+    }));
+    const harness = createHarness({
+      scanNativeSessions: async () => candidates,
+    });
+
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/claude_sessions'));
+
+    const html = String(lastSend(harness.adapter)?.html ?? '');
+    expect(html).toContain('preview-1');
+    expect(html).toContain('preview-5');
+    expect(html).not.toContain('preview-6');
+    expect(html).toContain('Showing 5 of 7');
+    expect(html).toContain('/claude_sessions all');
+    expect(harness.candidateCache.get(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID))).toEqual(candidates.slice(0, 5));
+  });
+
+  it('shows and caches all native sessions when /cs all is used', async () => {
+    const candidates = Array.from({ length: 7 }, (_, index) => makeCandidate(`native-all-${index + 1}`, {
+      cwd: `C:\\repo-all-${index + 1}`,
+      nativePreview: `all-preview-${index + 1}`,
+    }));
+    const harness = createHarness({
+      scanNativeSessions: async () => candidates,
+    });
+
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/cs all'));
+
+    const html = String(lastSend(harness.adapter)?.html ?? '');
+    expect(html).toContain('all-preview-1');
+    expect(html).toContain('all-preview-7');
+    expect(html).not.toContain('Showing 5 of 7');
+    expect(harness.candidateCache.get(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID))).toEqual(candidates);
+  });
+
   it('rejects native Claude commands outside Telegram', async () => {
     const harness = createHarness({ channelType: 'discord' });
 

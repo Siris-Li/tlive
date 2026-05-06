@@ -463,7 +463,7 @@ export class CommandRouter {
       case '/claude-sessions':
       case '/claude_sessions':
       case '/cs': {
-        return this.handleClaudeSessions(adapter, msg);
+        return this.handleClaudeSessions(adapter, msg, parts);
       }
       case '/resume-claude':
       case '/resume_claude':
@@ -657,7 +657,7 @@ export class CommandRouter {
     await this.getLeaseService().release(current.session.sdkSessionId, nativeLeaseOwner(channelType, chatId));
   }
 
-  private async handleClaudeSessions(adapter: BaseChannelAdapter, msg: InboundMessage): Promise<boolean> {
+  private async handleClaudeSessions(adapter: BaseChannelAdapter, msg: InboundMessage, parts: string[]): Promise<boolean> {
     const { store } = getBridgeContext();
     const leaseService = this.getLeaseService();
     const cache = this.getCandidateCache();
@@ -666,10 +666,12 @@ export class CommandRouter {
 
     await leaseService.cleanupExpired();
     const scan = this.nativeDeps?.scanNativeSessions ?? scanClaudeNativeSessions;
-    const scanned = (await scan()).slice(0, 10);
-    cache.set(chatKey, scanned);
+    const scanned = await scan();
+    const showAll = parts[1]?.toLowerCase() === 'all';
+    const displayed = showAll ? scanned : scanned.slice(0, 5);
+    cache.set(chatKey, displayed);
 
-    if (scanned.length === 0) {
+    if (displayed.length === 0) {
       await adapter.send({ chatId: msg.chatId, text: 'No Claude Code history sessions found.' });
       return true;
     }
@@ -681,8 +683,8 @@ export class CommandRouter {
     );
 
     const lines: string[] = [];
-    for (let i = 0; i < scanned.length; i += 1) {
-      const candidate = scanned[i];
+    for (let i = 0; i < displayed.length; i += 1) {
+      const candidate = displayed[i];
       const importedSession = importedSessionsBySdkId.get(candidate.sessionId);
       const lease = await leaseService.getActive(candidate.sessionId);
       const markers = this.buildCandidateMarkers(candidate, lease, owner, importedSession !== undefined);
@@ -697,12 +699,17 @@ export class CommandRouter {
       );
     }
 
+    const footer = ['<i>Use <code>/rc &lt;n&gt;</code> within 5 minutes to resume.</i>'];
+    if (!showAll && scanned.length > displayed.length) {
+      footer.push(`<i>Showing ${displayed.length} of ${scanned.length}. Use <code>/claude_sessions all</code> to show all desktop sessions.</i>`);
+    }
+
     const html = [
       '<b>🟣 Claude Code history sessions</b>',
       '',
       lines.join('\n'),
       '',
-      '<i>Use <code>/rc &lt;n&gt;</code> within 5 minutes to resume.</i>',
+      footer.join('\n'),
     ].join('\n');
     await adapter.send({ chatId: msg.chatId, html });
     return true;
