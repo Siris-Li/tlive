@@ -225,10 +225,18 @@ describe('TelegramAdapter', () => {
   });
 
   describe('start()', () => {
-    it('registers getMe and setMyCommands', async () => {
+    it('registers native Claude commands with Telegram-compatible menu names', async () => {
       await adapter.start();
       expect(mockGetMe).toHaveBeenCalled();
       expect(mockSetMyCommands).toHaveBeenCalled();
+      const commands = mockSetMyCommands.mock.calls.at(-1)?.[0] ?? [];
+      expect(commands).toEqual(expect.arrayContaining([
+        { command: 'claude_sessions', description: 'List native Claude sessions' },
+        { command: 'resume_claude', description: 'Resume native Claude session' },
+        { command: 'release', description: 'Release native Claude takeover' },
+      ]));
+      expect(commands.map((entry: { command: string }) => entry.command)).not.toContain('claude-sessions');
+      expect(commands.map((entry: { command: string }) => entry.command)).not.toContain('resume-claude');
     });
 
     it('installs throttler', async () => {

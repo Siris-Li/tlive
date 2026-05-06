@@ -305,7 +305,7 @@ afterEach(() => {
 });
 
 describe('CommandRouter native Claude commands', () => {
-  it('formats /cs results, caches candidates, and supports /claude-sessions alias', async () => {
+  it('formats /cs results, caches candidates, and supports /claude-sessions and /claude_sessions aliases', async () => {
     const imported = makeImportedSession({ sdkSessionId: 'native-1' });
     const candidate = makeCandidate('native-1', {
       sourcePath: 'C:\\history\\native-1.jsonl',
@@ -337,6 +337,10 @@ describe('CommandRouter native Claude commands', () => {
     vi.mocked(harness.adapter.send).mockClear();
     await harness.commandRouter.handle(harness.adapter, makeMessage('/claude-sessions'));
     expect(String(lastSend(harness.adapter)?.html ?? '')).toContain('Claude Code history sessions');
+
+    vi.mocked(harness.adapter.send).mockClear();
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/claude_sessions'));
+    expect(String(lastSend(harness.adapter)?.html ?? '')).toContain('Claude Code history sessions');
   });
 
   it('rejects native Claude commands outside Telegram', async () => {
@@ -356,6 +360,27 @@ describe('CommandRouter native Claude commands', () => {
     await harness.commandRouter.handle(harness.adapter, makeMessage('/rc 1'));
 
     expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('/claude-sessions');
+  });
+
+  it('resumes a numeric cached candidate from the Telegram-compatible /resume_claude alias', async () => {
+    const cwd = createTempDir('resume-underscore-target');
+    const candidate = makeCandidate('native-underscore', { cwd, cwdExists: true });
+    const harness = createHarness({
+      scanNativeSessions: async () => [candidate],
+    });
+
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/cs'));
+    vi.mocked(harness.adapter.send).mockClear();
+
+    const handled = await harness.commandRouter.handle(harness.adapter, makeMessage('/resume_claude 1'));
+
+    expect(handled).toBe(true);
+    const resumed = (await harness.store.listSessions()).find(session => session.sdkSessionId === 'native-underscore');
+    expect(resumed).toBeTruthy();
+    expect((await harness.store.getBinding(CHANNEL_TYPE, CHAT_ID))?.sessionId).toBe(resumed?.id);
+    expect(await harness.leaseService.getActive('native-underscore')).toEqual(
+      expect.objectContaining({ owner: nativeLeaseOwner(CHANNEL_TYPE, CHAT_ID) }),
+    );
   });
 
   it('resumes a numeric cached candidate, rebinds the chat, switches runtime to Claude, and moves the lease', async () => {
