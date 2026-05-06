@@ -160,15 +160,14 @@ export class ClaudeLiveSession implements LiveSession {
         const events = this.adapter.mapMessage(msg as any);
         for (const event of events) {
           this.currentTurnController?.enqueue(event);
+        }
 
-          // result event = turn boundary
-          if (event.kind === 'query_result') {
-            this._isTurnActive = false;
-            this.currentTurnController?.close();
-            this.currentTurnController = null;
-            // Reset adapter state between turns to prevent hiddenToolUseIds leak
-            this.adapter.reset();
-          }
+        if (events.some(event => event.kind === 'query_result' || event.kind === 'error')) {
+          this._isTurnActive = false;
+          this.currentTurnController?.close();
+          this.currentTurnController = null;
+          // Reset adapter state between turns to prevent hiddenToolUseIds leak
+          this.adapter.reset();
         }
       }
     } catch (err) {

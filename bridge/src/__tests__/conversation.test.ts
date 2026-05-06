@@ -120,4 +120,56 @@ describe('ConversationEngine', () => {
     await engine.processMessage({ sessionId: 's1', text: 'hi' });
     expect(mockStore.releaseLock).toHaveBeenCalled();
   });
+
+  it('preserves imported native session metadata when updating sdkSessionId', async () => {
+    let session = {
+      id: 'imported',
+      workingDirectory: 'D:\\repo',
+      createdAt: '2026-05-06T09:00:00.000Z',
+      sdkSessionId: 'old-native',
+      source: 'claude-native' as const,
+      sourcePath: 'native.jsonl',
+      importedAt: '2026-05-06T09:00:00.000Z',
+      lastNativeActivityAt: '2026-05-06T09:30:00.000Z',
+      nativePreview: 'preview',
+    };
+    const store = {
+      acquireLock: vi.fn().mockResolvedValue(true),
+      releaseLock: vi.fn().mockResolvedValue(undefined),
+      saveMessage: vi.fn().mockResolvedValue(undefined),
+      getSession: vi.fn().mockResolvedValue(session),
+      saveSession: vi.fn(async (next) => { session = next; }),
+    } as any;
+
+    initBridgeContext({
+      store,
+      defaultWorkdir: 'D:\\default',
+      llm: {
+        streamChat: () => ({
+          stream: new ReadableStream<CanonicalEvent>({
+            start(controller) {
+              controller.enqueue({ kind: 'query_result', sessionId: 'new-native', isError: false, usage: { inputTokens: 1, outputTokens: 1 } });
+              controller.close();
+            },
+          }),
+          controls: undefined,
+        }),
+      } as any,
+      permissions: {} as any,
+      core: {} as any,
+    });
+
+    const engine = new ConversationEngine();
+    await engine.processMessage({ sessionId: 'imported', text: 'hello' });
+
+    expect(store.saveSession).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'imported',
+      sdkSessionId: 'new-native',
+      source: 'claude-native',
+      sourcePath: 'native.jsonl',
+      importedAt: '2026-05-06T09:00:00.000Z',
+      lastNativeActivityAt: '2026-05-06T09:30:00.000Z',
+      nativePreview: 'preview',
+    }));
+  });
 });

@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, renameSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import type { BridgeStore, SessionData, Message, ChannelBinding } from './interface.js';
+import type { BridgeStore, SessionData, Message, ChannelBinding, NativeSessionLease } from './interface.js';
 
 export class JsonFileStore implements BridgeStore {
   private dataDir: string;
@@ -9,6 +9,7 @@ export class JsonFileStore implements BridgeStore {
   private bindings = new Map<string, ChannelBinding>(); // key: channelType:chatId
   private processedIds = new Set<string>();
   private locks = new Map<string, number>(); // key -> expiresAt timestamp
+  private nativeSessionLeases = new Map<string, NativeSessionLease>();
 
   constructor(dataDir: string) {
     this.dataDir = dataDir;
@@ -54,6 +55,10 @@ export class JsonFileStore implements BridgeStore {
     return join(this.dataDir, 'processed.json');
   }
 
+  private nativeSessionLeasesPath(): string {
+    return join(this.dataDir, 'native-session-leases.json');
+  }
+
   private loadFromDisk(): void {
     // Load bindings
     const bindings = this.readJson<Record<string, ChannelBinding>>(this.bindingsPath());
@@ -68,6 +73,14 @@ export class JsonFileStore implements BridgeStore {
     if (processed) {
       for (const id of processed) {
         this.processedIds.add(id);
+      }
+    }
+
+    // Load native session leases
+    const nativeSessionLeases = this.readJson<Record<string, NativeSessionLease>>(this.nativeSessionLeasesPath());
+    if (nativeSessionLeases) {
+      for (const [sdkSessionId, lease] of Object.entries(nativeSessionLeases)) {
+        this.nativeSessionLeases.set(sdkSessionId, lease);
       }
     }
 
@@ -104,6 +117,14 @@ export class JsonFileStore implements BridgeStore {
     this.atomicWrite(indexPath, [...this.messages.keys()]);
   }
 
+  private persistNativeSessionLeases(): void {
+    const obj: Record<string, NativeSessionLease> = {};
+    for (const [sdkSessionId, lease] of this.nativeSessionLeases.entries()) {
+      obj[sdkSessionId] = lease;
+    }
+    this.atomicWrite(this.nativeSessionLeasesPath(), obj);
+  }
+
   // ---- Sessions ----
 
   async getSession(id: string): Promise<SessionData | null> {
@@ -125,6 +146,26 @@ export class JsonFileStore implements BridgeStore {
     const path = this.sessionPath(id);
     if (existsSync(path)) unlinkSync(path);
     this.persistSessionsIndex();
+  }
+
+  // ---- Native session leases ----
+
+  async getNativeSessionLease(sdkSessionId: string): Promise<NativeSessionLease | null> {
+    return this.nativeSessionLeases.get(sdkSessionId) ?? null;
+  }
+
+  async saveNativeSessionLease(lease: NativeSessionLease): Promise<void> {
+    this.nativeSessionLeases.set(lease.sdkSessionId, lease);
+    this.persistNativeSessionLeases();
+  }
+
+  async deleteNativeSessionLease(sdkSessionId: string): Promise<void> {
+    this.nativeSessionLeases.delete(sdkSessionId);
+    this.persistNativeSessionLeases();
+  }
+
+  async listNativeSessionLeases(): Promise<NativeSessionLease[]> {
+    return [...this.nativeSessionLeases.values()];
   }
 
   // ---- Messages ----

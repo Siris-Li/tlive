@@ -1,6 +1,11 @@
 export interface SessionData {
   id: string;
   sdkSessionId?: string;
+  source?: 'claude-native';
+  sourcePath?: string;
+  importedAt?: string;
+  lastNativeActivityAt?: string;
+  nativePreview?: string;
   workingDirectory: string;
   model?: string;
   mode?: string;
@@ -20,12 +25,28 @@ export interface ChannelBinding {
   createdAt: string;
 }
 
+export interface NativeSessionLease {
+  sdkSessionId: string;
+  owner: string;
+  ownerUserId?: string;
+  tliveSessionId: string;
+  lockedAt: string;
+  lastActiveAt: string;
+  ttlMinutes: number;
+}
+
 export interface BridgeStore {
   // Sessions
   getSession(id: string): Promise<SessionData | null>;
   saveSession(session: SessionData): Promise<void>;
   listSessions(): Promise<SessionData[]>;
   deleteSession(id: string): Promise<void>;
+
+  // Native session leases
+  getNativeSessionLease(sdkSessionId: string): Promise<NativeSessionLease | null>;
+  saveNativeSessionLease(lease: NativeSessionLease): Promise<void>;
+  deleteNativeSessionLease(sdkSessionId: string): Promise<void>;
+  listNativeSessionLeases(): Promise<NativeSessionLease[]>;
 
   // Messages
   getMessages(sessionId: string): Promise<Message[]>;

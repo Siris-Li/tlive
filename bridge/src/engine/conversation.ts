@@ -135,6 +135,7 @@ export class ConversationEngine {
             if (value.sessionId) {
               const existing = await store.getSession(params.sessionId);
               await store.saveSession({
+                ...(existing ?? { id: params.sessionId, workingDirectory: defaultWorkdir, createdAt: new Date().toISOString() }),
                 id: params.sessionId,
                 workingDirectory: existing?.workingDirectory ?? defaultWorkdir,
                 createdAt: existing?.createdAt ?? new Date().toISOString(),
