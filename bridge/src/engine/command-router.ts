@@ -37,8 +37,10 @@ interface NativeCommandDeps {
 
 const TELEGRAM_ONLY_NATIVE_COMMANDS = new Set([
   '/claude-sessions',
+  '/claude_sessions',
   '/cs',
   '/resume-claude',
+  '/resume_claude',
   '/rc',
   '/release',
 ]);
@@ -459,10 +461,12 @@ export class CommandRouter {
         return true;
       }
       case '/claude-sessions':
+      case '/claude_sessions':
       case '/cs': {
         return this.handleClaudeSessions(adapter, msg);
       }
       case '/resume-claude':
+      case '/resume_claude':
       case '/rc': {
         return this.handleResumeClaude(adapter, msg, parts);
       }
@@ -476,8 +480,8 @@ export class CommandRouter {
             '',
             '<code>/menu</code> — ⚙️ <b>Control Panel</b> ✨',
             '<code>/new</code> — New conversation',
-            '<code>/claude-sessions</code> · <code>/cs</code> — Claude native session list',
-            '<code>/resume-claude &lt;n|current&gt;</code> · <code>/rc</code> — Resume Claude native session',
+            '<code>/claude_sessions</code> · <code>/claude-sessions</code> · <code>/cs</code> — Claude native session list',
+            '<code>/resume_claude &lt;n|current&gt;</code> · <code>/resume-claude</code> · <code>/rc</code> — Resume Claude native session',
             '<code>/release</code> — Release Claude native lease',
             '',
             '<i>Legacy (use /menu instead):</i>',
