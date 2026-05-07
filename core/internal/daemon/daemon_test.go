@@ -4,8 +4,10 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDaemon_StatusEndpoint(t *testing.T) {
@@ -47,6 +49,68 @@ func TestDaemon_CreateSessionEndpoint(t *testing.T) {
 	if resp.Command != "echo" {
 		t.Errorf("expected command 'echo', got %q", resp.Command)
 	}
+}
+
+func TestDaemon_CreateSessionEndpointUsesRequestedCwd(t *testing.T) {
+	d := NewDaemon(DaemonConfig{Port: 0, Token: "test-token"})
+	handler := d.Handler()
+	cwd := t.TempDir()
+	command, args := cwdCommand()
+
+	body, err := json.Marshal(CreateSessionRequest{
+		Command: command,
+		Args:    args,
+		Rows:    24,
+		Cols:    80,
+		Cwd:     cwd,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("POST", "/api/sessions", strings.NewReader(string(body)))
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	list := d.Manager().ListSessions()
+	if len(list) != 1 {
+		t.Fatalf("expected 1 session, got %d", len(list))
+	}
+	defer d.Manager().StopSession(list[0].ID)
+	if list[0].Cwd != cwd {
+		t.Fatalf("expected session cwd %q, got %q", cwd, list[0].Cwd)
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		output := list[0].LastOutput(4096)
+		if outputContainsCwd(string(output), cwd) {
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for cwd output %q, got %q", cwd, string(output))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+func cwdCommand() (string, []string) {
+	if runtime.GOOS == "windows" {
+		return "cmd.exe", []string{"/C", "cd"}
+	}
+	return "pwd", nil
+}
+
+func outputContainsCwd(output, cwd string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.Contains(strings.ToLower(output), strings.ToLower(cwd))
+	}
+	return strings.Contains(output, cwd)
 }
 
 func TestDaemon_UnauthorizedReturnsHTML(t *testing.T) {

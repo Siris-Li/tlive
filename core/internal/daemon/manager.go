@@ -6,7 +6,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -19,6 +18,7 @@ import (
 type SessionConfig struct {
 	Rows uint16
 	Cols uint16
+	Cwd  string
 }
 
 // ManagedSession ties together a session, its hub, PTY process, and
@@ -43,10 +43,10 @@ func (ms *ManagedSession) ExitCode() int {
 
 // SessionManager coordinates the lifecycle of multiple managed sessions.
 type SessionManager struct {
-	store       *session.Store
-	mu          sync.RWMutex
-	managed     map[string]*ManagedSession
-	noClientAt  map[string]time.Time // tracks when a session first had 0 clients
+	store      *session.Store
+	mu         sync.RWMutex
+	managed    map[string]*ManagedSession
+	noClientAt map[string]time.Time // tracks when a session first had 0 clients
 }
 
 // NewSessionManager creates a new SessionManager.
@@ -74,7 +74,7 @@ func (m *SessionManager) CreateSession(cmd string, args []string, cfg SessionCon
 	go h.Run()
 
 	// 3. Start PTY process
-	proc, err := pty.Start(cmd, args, cfg.Rows, cfg.Cols, "TLIVE_SESSION_ID="+sess.ID)
+	proc, err := pty.Start(cmd, args, cfg.Rows, cfg.Cols, pty.StartOptions{Cwd: cfg.Cwd}, "TLIVE_SESSION_ID="+sess.ID)
 	if err != nil {
 		h.Stop()
 		return nil, fmt.Errorf("pty start: %w", err)
@@ -84,8 +84,10 @@ func (m *SessionManager) CreateSession(cmd string, args []string, cfg SessionCon
 	sess.Pid = proc.Pid()
 	sess.Rows = cfg.Rows
 	sess.Cols = cfg.Cols
-	if cwd, err := os.Getwd(); err == nil {
-		sess.Cwd = filepath.Base(cwd)
+	if cfg.Cwd != "" {
+		sess.Cwd = cfg.Cwd
+	} else if cwd, err := os.Getwd(); err == nil {
+		sess.Cwd = cwd
 	}
 
 	// 5. Set hub input handler to write to PTY

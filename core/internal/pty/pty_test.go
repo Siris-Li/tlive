@@ -10,7 +10,7 @@ import (
 )
 
 func TestStartAndRead(t *testing.T) {
-	proc, err := Start("echo", []string{"hello"}, 24, 80)
+	proc, err := Start("echo", []string{"hello"}, 24, 80, StartOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -40,8 +40,41 @@ func TestStartAndRead(t *testing.T) {
 	}
 }
 
+func TestStartUsesCwd(t *testing.T) {
+	cwd := t.TempDir()
+	proc, err := Start("pwd", nil, 24, 80, StartOptions{Cwd: cwd})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proc.Close()
+
+	var buf bytes.Buffer
+	tmp := make([]byte, 1024)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for {
+			n, err := proc.Read(tmp)
+			if n > 0 {
+				buf.Write(tmp[:n])
+			}
+			if err != nil {
+				return
+			}
+		}
+	}()
+	proc.Wait()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+	}
+	if !strings.Contains(buf.String(), cwd) {
+		t.Errorf("expected output to contain cwd %q, got: %q", cwd, buf.String())
+	}
+}
+
 func TestPid(t *testing.T) {
-	proc, err := Start("sleep", []string{"1"}, 24, 80)
+	proc, err := Start("sleep", []string{"1"}, 24, 80, StartOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}

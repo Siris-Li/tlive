@@ -102,8 +102,12 @@ func runHost(cfg *config.Config, args []string, rows, cols uint16, lockPath stri
 	mgr.StartReaper(60 * time.Second)
 
 	// Create session directly (in-process, no HTTP)
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get cwd: %w", err)
+	}
 	ms, err := mgr.CreateSession(args[0], args[1:], daemon.SessionConfig{
-		Rows: rows, Cols: cols,
+		Rows: rows, Cols: cols, Cwd: cwd,
 	})
 	if err != nil {
 		return fmt.Errorf("failed to start command: %w", err)
@@ -262,8 +266,13 @@ func runHost(cfg *config.Config, args []string, rows, cols uint16, lockPath stri
 // runClient connects to an already-running daemon and creates a new session
 // via HTTP API, then relays I/O over WebSocket.
 func runClient(lock daemon.LockInfo, args []string, rows, cols uint16) error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("get cwd: %w", err)
+	}
+
 	// Create session via HTTP API
-	sessionID, err := createSessionViaAPI(lock.Port, lock.Token, args[0], args[1:], rows, cols)
+	sessionID, err := createSessionViaAPI(lock.Port, lock.Token, args[0], args[1:], rows, cols, cwd)
 	if err != nil {
 		return fmt.Errorf("failed to create session: %w", err)
 	}
@@ -400,12 +409,13 @@ func daemonHealthCheck(port int, token string) bool {
 }
 
 // createSessionViaAPI creates a new session on the remote daemon via HTTP POST.
-func createSessionViaAPI(port int, token string, command string, args []string, rows, cols uint16) (string, error) {
+func createSessionViaAPI(port int, token string, command string, args []string, rows, cols uint16, cwd string) (string, error) {
 	reqBody := daemon.CreateSessionRequest{
 		Command: command,
 		Args:    args,
 		Rows:    rows,
 		Cols:    cols,
+		Cwd:     cwd,
 	}
 	data, _ := json.Marshal(reqBody)
 	url := fmt.Sprintf("http://localhost:%d/api/sessions", port)

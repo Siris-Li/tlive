@@ -3,8 +3,8 @@ package daemon
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -102,6 +102,7 @@ type CreateSessionRequest struct {
 	Args    []string `json:"args"`
 	Rows    uint16   `json:"rows"`
 	Cols    uint16   `json:"cols"`
+	Cwd     string   `json:"cwd,omitempty"`
 }
 
 // CreateSessionResponse is the JSON response for POST /api/sessions.
@@ -298,7 +299,7 @@ func (d *Daemon) handleCreateSession(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ms, err := d.mgr.CreateSession(req.Command, req.Args, SessionConfig{
-		Rows: req.Rows, Cols: req.Cols,
+		Rows: req.Rows, Cols: req.Cols, Cwd: req.Cwd,
 	})
 	if err != nil {
 		http.Error(w, "failed to create session: "+err.Error(), http.StatusInternalServerError)

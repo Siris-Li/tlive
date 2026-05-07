@@ -2,6 +2,10 @@ package pty
 
 import "io"
 
+type StartOptions struct {
+	Cwd string
+}
+
 // Process wraps a command running in a pseudo-terminal.
 type Process interface {
 	io.Reader

@@ -11,14 +11,15 @@ import (
 )
 
 type unixProcess struct {
-	ptmx   *os.File
-	cmd    *exec.Cmd
+	ptmx    *os.File
+	cmd     *exec.Cmd
 	hasPgid bool
 }
 
-func Start(name string, args []string, rows, cols uint16, extraEnv ...string) (Process, error) {
+func Start(name string, args []string, rows, cols uint16, opts StartOptions, extraEnv ...string) (Process, error) {
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), extraEnv...)
+	cmd.Dir = opts.Cwd
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 
 	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
@@ -27,6 +28,7 @@ func Start(name string, args []string, rows, cols uint16, extraEnv ...string) (P
 		// security policies) reject setpgid with EPERM.
 		cmd = exec.Command(name, args...)
 		cmd.Env = append(os.Environ(), extraEnv...)
+		cmd.Dir = opts.Cwd
 		ptmx, err = pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
 		if err != nil {
 			return nil, err

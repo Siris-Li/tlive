@@ -15,13 +15,13 @@ import (
 )
 
 type windowsProcess struct {
-	cpty     *conpty.ConPty
-	pid      int
+	cpty      *conpty.ConPty
+	pid       int
 	closeOnce sync.Once
 	closeErr  error
 }
 
-func Start(name string, args []string, rows, cols uint16, extraEnv ...string) (Process, error) {
+func Start(name string, args []string, rows, cols uint16, opts StartOptions, extraEnv ...string) (Process, error) {
 	cmdLine := name
 	if len(args) > 0 {
 		cmdLine = name + " " + strings.Join(args, " ")
@@ -40,7 +40,12 @@ func Start(name string, args []string, rows, cols uint16, extraEnv ...string) (P
 		}
 	}
 
-	cpty, err := conpty.Start(cmdLine, conpty.ConPtyDimensions(int(cols), int(rows)))
+	options := []conpty.ConPtyOption{conpty.ConPtyDimensions(int(cols), int(rows))}
+	if opts.Cwd != "" {
+		options = append(options, conpty.ConPtyWorkDir(opts.Cwd))
+	}
+
+	cpty, err := conpty.Start(cmdLine, options...)
 	if err != nil {
 		return nil, fmt.Errorf("conpty start: %w", err)
 	}
