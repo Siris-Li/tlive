@@ -10,13 +10,14 @@
     }
 
     var term = new Terminal({
-        cursorBlink: true,
+        cursorBlink: false,
         fontSize: 14,
         fontFamily: "'Cascadia Mono', 'Cascadia Code', 'MesloLGS NF', 'Menlo', 'Consolas', 'DejaVu Sans Mono', monospace",
         theme: {
             background: '#0d1117',
             foreground: '#e6edf3',
-            cursor: '#4ecca3',
+            cursor: '#0d1117',
+            cursorAccent: '#0d1117',
             selectionBackground: '#264f78',
         },
         allowProposedApi: true,
