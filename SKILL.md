@@ -193,3 +193,4 @@ In IM (from phone):
 - Hook approval requires Claude Code to be launched through `tlive claude` so hooks receive `TLIVE_SESSION_ID`; ordinary `claude` sessions pass hooks through locally
 - Config at `~/.tlive/config.env` — shared by both Bridge and Go Core
 - The daemon runs as a background Node.js process
+- Native Claude sessions with unknown or missing cwd require `/resume <n|current> cwd "absolute path"`; do not fall back to the Bridge default workdir.

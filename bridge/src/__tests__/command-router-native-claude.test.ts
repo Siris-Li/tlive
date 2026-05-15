@@ -305,7 +305,7 @@ afterEach(() => {
 });
 
 describe('CommandRouter native Claude commands', () => {
-  it('shows the resume working directory instead of JSONL identifiers in /session results', async () => {
+  it('shows unavailable cwd instead of default workdir for unknown-cwd /session results', async () => {
     const candidate = makeCandidate('native-display', {
       sourcePath: 'C:\\history\\native-display.jsonl',
       cwd: undefined,
@@ -320,16 +320,18 @@ describe('CommandRouter native Claude commands', () => {
     await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
 
     const html = String(lastSend(harness.adapter)?.html ?? '');
-    expect(html).toContain('C:\\repo');
+    expect(html).toContain('cwd unavailable');
     expect(html).not.toContain('native-display.jsonl');
     expect(html).not.toContain('C:\\history');
     expect(html).not.toContain('native-display</code>');
+    expect(html).not.toContain('C:\\repo');
   });
 
   it('uses an existing imported session working directory as the /session resume path', async () => {
+    const importedCwd = createTempDir('existing imported cwd');
     const imported = makeImportedSession({
       sdkSessionId: 'native-existing-display',
-      workingDirectory: 'D:\\stable\\repo',
+      workingDirectory: importedCwd,
     });
     const candidate = makeCandidate('native-existing-display', {
       sourcePath: 'C:\\history\\native-existing-display.jsonl',
@@ -345,13 +347,14 @@ describe('CommandRouter native Claude commands', () => {
     await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
 
     const html = String(lastSend(harness.adapter)?.html ?? '');
-    expect(html).toContain('D:\\stable\\repo');
+    expect(html).toContain(importedCwd);
     expect(html).not.toContain('D:\\old-worktree\\repo');
     expect(html).not.toContain('native-existing-display.jsonl');
   });
 
   it('formats /session results and caches candidates', async () => {
-    const imported = makeImportedSession({ sdkSessionId: 'native-1' });
+    const importedCwd = createTempDir('format stable cwd');
+    const imported = makeImportedSession({ sdkSessionId: 'native-1', workingDirectory: importedCwd });
     const candidate = makeCandidate('native-1', {
       sourcePath: 'C:\\history\\native-1.jsonl',
       cwd: undefined,
@@ -372,8 +375,8 @@ describe('CommandRouter native Claude commands', () => {
     expect(html).toContain('📋 Claude Code history sessions');
     expect(html).not.toContain('🟣 Claude Code history sessions');
     expect(html).toContain('🔒 yours');
-    expect(html).toContain('⚠️ cwd unknown');
-    expect(html).toContain('📁 <code>C:\\repo</code>');
+    expect(html).not.toContain('⚠️ cwd unknown');
+    expect(html).toContain(`📁 <code>${importedCwd}</code>`);
     expect(html).toContain('💬 native-preview-native-1');
     expect(html).not.toContain('locked by you');
     expect(html).not.toContain('branch feature/native');
@@ -381,8 +384,7 @@ describe('CommandRouter native Claude commands', () => {
     expect(html).not.toContain('imported');
     expect(html).toContain('🌿 feature/native');
     expect(html).toContain('/resume &lt;n&gt;');
-    expect(html.indexOf('🔒 yours')).toBeLessThan(html.indexOf('⚠️ cwd unknown'));
-    expect(html.indexOf('⚠️ cwd unknown')).toBeLessThan(html.indexOf('🌿 feature/native'));
+    expect(html.indexOf('🔒 yours')).toBeLessThan(html.indexOf('🌿 feature/native'));
     expect(harness.candidateCache.get(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID))).toEqual([candidate]);
   });
 
@@ -549,10 +551,11 @@ describe('CommandRouter native Claude commands', () => {
   });
   it('reuses an existing imported session for the same sdkSessionId', async () => {
     const candidate = makeCandidate('native-existing', { cwd: createTempDir('existing-sdk') });
+    const existingCwd = createTempDir('existing-imported-sdk');
     const existing = makeImportedSession({
       id: 'session-imported-existing',
       sdkSessionId: 'native-existing',
-      workingDirectory: 'C:\\old-path',
+      workingDirectory: existingCwd,
     });
     const harness = createHarness({
       scanNativeSessions: async () => [candidate],
@@ -569,7 +572,7 @@ describe('CommandRouter native Claude commands', () => {
     expect(session?.workingDirectory).toBe(existing.workingDirectory);
   });
 
-  it('uses the default workdir when resuming a candidate with no cwd', async () => {
+  it('rejects resuming a candidate with no cwd unless cwd is supplied', async () => {
     const candidate = makeCandidate('native-default-cwd', {
       cwd: undefined,
       cwdSource: 'unknown',
@@ -584,11 +587,13 @@ describe('CommandRouter native Claude commands', () => {
     await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1'));
 
     const resumed = (await harness.store.listSessions()).find(session => session.sdkSessionId === 'native-default-cwd');
-    expect(resumed?.workingDirectory).toBe('C:\\repo');
-    expect(String(vi.mocked(harness.adapter.send).mock.calls[0]?.[0]?.html ?? '')).toContain('C:\\repo');
+    expect(resumed).toBeUndefined();
+    expect(await harness.leaseService.getActive('native-default-cwd')).toBeNull();
+    expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('cwd is unavailable');
+    expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('/resume 1 cwd "');
   });
 
-  it('uses the default workdir when the candidate cwd is missing and no override is supplied', async () => {
+  it('rejects resuming a candidate whose cwd path is missing unless cwd is supplied', async () => {
     const candidate = makeCandidate('native-missing', {
       cwd: 'C:\\missing-path',
       cwdExists: false,
@@ -602,8 +607,36 @@ describe('CommandRouter native Claude commands', () => {
     await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1'));
 
     const resumed = (await harness.store.listSessions()).find(session => session.sdkSessionId === 'native-missing');
-    expect(resumed?.workingDirectory).toBe('C:\\missing-path');
-    expect(await harness.leaseService.getActive('native-missing')).toEqual(
+    expect(resumed).toBeUndefined();
+    expect(await harness.leaseService.getActive('native-missing')).toBeNull();
+    expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('cwd path is missing');
+    expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('/resume 1 cwd "');
+  });
+
+  it('resumes an unknown-cwd candidate when an existing imported cwd is valid', async () => {
+    const importedCwd = createTempDir('valid imported resume cwd');
+    const existing = makeImportedSession({
+      id: 'session-imported-valid-cwd',
+      sdkSessionId: 'native-valid-imported-cwd',
+      workingDirectory: importedCwd,
+    });
+    const candidate = makeCandidate('native-valid-imported-cwd', {
+      cwd: undefined,
+      cwdSource: 'unknown',
+      cwdExists: false,
+    });
+    const harness = createHarness({
+      scanNativeSessions: async () => [candidate],
+    });
+    await harness.store.saveSession(existing);
+
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
+    vi.mocked(harness.adapter.send).mockClear();
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1'));
+
+    const resumed = await harness.store.getSession(existing.id);
+    expect(resumed?.workingDirectory).toBe(importedCwd);
+    expect(await harness.leaseService.getActive('native-valid-imported-cwd')).toEqual(
       expect.objectContaining({ owner: nativeLeaseOwner(CHANNEL_TYPE, CHAT_ID) }),
     );
   });

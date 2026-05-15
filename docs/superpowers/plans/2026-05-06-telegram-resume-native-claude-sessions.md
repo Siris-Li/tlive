@@ -33,7 +33,7 @@
   - Preserves `importedAt` on reuse and refreshes cwd/source/native activity metadata.
 
 - `bridge/src/engine/native-command-cache.ts`
-  - Stores `/claude-sessions` candidate lists in memory by chat key for 5 minutes.
+  - Stores `/session` candidate lists in memory by chat key for 5 minutes.
   - Keeps cache logic out of `CommandRouter` so command tests can inspect expiry behavior directly.
 
 ### Modified source files
@@ -58,7 +58,7 @@
   - Release the lease if Claude resume/start fails.
 
 - `bridge/src/engine/command-router.ts`
-  - Add `/claude-sessions`, `/cs`, `/resume-claude`, `/rc`, and `/release`.
+  - Add `/session`, `/session all`, `/resume <n|current>`, and `/release`.
   - Add constructor dependencies for active-chat checks, session closing, candidate cache, scanner/importer/lease services if not instantiated internally.
   - Update `/new`, `/session`, `/runtime`, `/stop`, `/sessions`, and Telegram `/help` for native-session semantics.
 
@@ -67,7 +67,7 @@
   - Pass `SDKEngine.isChatActive()` and close-session callbacks into `CommandRouter`.
 
 - `README.md` and `README_CN.md`
-  - Add a short command list for `/claude-sessions` (`/cs`), `/resume-claude <n|current>` (`/rc`), and `/release`.
+  - Add a short command list for `/session`, `/session all`, `/resume <n|current>`, `/resume <n|current> cwd "<absolute path>"`, and `/release`.
 
 ### New tests
 
@@ -1438,7 +1438,7 @@ git commit -m "feat(bridge): import native Claude sessions"
 
 ---
 
-## Task 6: Add Candidate Cache for `/claude-sessions`
+## Task 6: Add Candidate Cache for `/session`
 
 **Files:**
 - Create: `bridge/src/engine/native-command-cache.ts`
@@ -1674,15 +1674,15 @@ describe('CommandRouter native Claude commands', () => {
     vi.useRealTimers();
   });
 
-  it('formats /claude-sessions list and caches indices', async () => {
+  it('formats /session list and caches indices', async () => {
     const { router, adapter } = makeRouter({ scanner: async () => [candidate('native-12345678')] });
 
-    await handle(router, adapter, '/cs');
+    await handle(router, adapter, '/session');
 
     expect(adapter.send).toHaveBeenCalledWith(expect.objectContaining({
       html: expect.stringContaining('Claude Code Sessions'),
     }));
-    expect((adapter.send as any).mock.calls[0][0].html).toContain('/rc &lt;n&gt;');
+    expect((adapter.send as any).mock.calls[0][0].html).toContain('/resume &lt;n&gt;');
     expect((adapter.send as any).mock.calls[0][0].html).toContain('5 minutes');
   });
 
@@ -1690,17 +1690,17 @@ describe('CommandRouter native Claude commands', () => {
     const adapter = mockAdapter('discord');
     const { router } = makeRouter();
 
-    await handle(router, adapter, '/cs', 'discord');
+    await handle(router, adapter, '/session', 'discord');
 
     expect(adapter.send).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('Telegram only') }));
   });
 
-  it('/rc <n> requires cached candidates', async () => {
+  it('/resume <n> requires cached candidates', async () => {
     const { router, adapter } = makeRouter();
 
-    await handle(router, adapter, '/rc 1');
+    await handle(router, adapter, '/resume 1');
 
-    expect(adapter.send).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('/claude-sessions') }));
+    expect(adapter.send).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('/session') }));
   });
 
   it('numeric resume saves imported session, binding, and lease', async () => {
@@ -1708,8 +1708,8 @@ describe('CommandRouter native Claude commands', () => {
     const store = storeWithNativeState();
     const { router, adapter } = makeRouter({ store, scanner: async () => [native] });
 
-    await handle(router, adapter, '/cs');
-    await handle(router, adapter, '/rc 1');
+    await handle(router, adapter, '/session');
+    await handle(router, adapter, '/resume 1');
 
     expect(store.saveSession).toHaveBeenCalledWith(expect.objectContaining({ sdkSessionId: 'native-12345678', source: 'claude-native' }));
     expect(store.saveBinding).toHaveBeenCalledWith(expect.objectContaining({ sessionId: expect.stringContaining('session-imported-12345678') }));
@@ -1717,27 +1717,27 @@ describe('CommandRouter native Claude commands', () => {
     expect(adapter.send).toHaveBeenCalledWith(expect.objectContaining({ html: expect.stringContaining('12345678') }));
   });
 
-  it('rejects missing cwd unless --cwd provides an absolute existing directory', async () => {
+  it('rejects missing cwd unless cwd provides an absolute existing directory', async () => {
     const native = candidate('native-12345678');
     native.cwd = undefined;
     native.cwdExists = false;
     const { router, adapter, store } = makeRouter({ scanner: async () => [native] });
 
-    await handle(router, adapter, '/cs');
-    await handle(router, adapter, '/rc 1');
-    expect(adapter.send).toHaveBeenLastCalledWith(expect.objectContaining({ text: expect.stringContaining('--cwd') }));
+    await handle(router, adapter, '/session');
+    await handle(router, adapter, '/resume 1');
+    expect(adapter.send).toHaveBeenLastCalledWith(expect.objectContaining({ text: expect.stringContaining('cwd') }));
 
-    await handle(router, adapter, '/cs');
-    await handle(router, adapter, '/rc 1 --cwd "D:\\My Projects\\repo"');
+    await handle(router, adapter, '/session');
+    await handle(router, adapter, '/resume 1 cwd "D:\\My Projects\\repo"');
     expect(store.saveSession).toHaveBeenCalledWith(expect.objectContaining({ workingDirectory: 'D:\\My Projects\\repo' }));
   });
 
-  it('/rc current uses current imported binding without candidate cache', async () => {
+  it('/resume current uses current imported binding without candidate cache', async () => {
     const session: SessionData = { id: 'imported', workingDirectory: 'D:\\repo', createdAt: '', sdkSessionId: 'native-12345678', source: 'claude-native', sourcePath: 'native.jsonl', importedAt: '', lastNativeActivityAt: '', nativePreview: 'preview' };
     const store = storeWithNativeState({ sessions: [session], bindingSessionId: 'imported' });
     const { router, adapter } = makeRouter({ store, findById: async () => candidate('native-12345678') });
 
-    await handle(router, adapter, '/rc current');
+    await handle(router, adapter, '/resume current');
 
     expect(store.saveNativeSessionLease).toHaveBeenCalledWith(expect.objectContaining({ sdkSessionId: 'native-12345678' }));
     expect(adapter.send).toHaveBeenCalledWith(expect.objectContaining({ html: expect.stringContaining('12345678') }));
@@ -1868,9 +1868,9 @@ Add helper methods inside `CommandRouter`:
     const target = tokens[1];
     let cwdOverride: string | undefined;
     for (let i = 2; i < tokens.length; i++) {
-      if (tokens[i] !== '--cwd') return { target, error: 'Usage: /resume-claude <n|current> [--cwd "D:\\path with spaces"]' };
+      if (tokens[i] !== 'cwd') return { target, error: 'Usage: /resume <n|current> [cwd "D:\\path with spaces"]' };
       const rawPath = tokens[i + 1];
-      if (!rawPath) return { target, error: 'Missing path after --cwd.' };
+      if (!rawPath) return { target, error: 'Missing path after cwd.' };
       cwdOverride = rawPath.startsWith('"') && rawPath.endsWith('"') ? rawPath.slice(1, -1) : rawPath;
       i += 1;
     }
@@ -1907,18 +1907,17 @@ import { existsSync, writeFileSync, unlinkSync, mkdirSync, statSync } from 'node
 
 Then `validateCwdOverride()` should call `statSync(cwdOverride).isDirectory()`.
 
-- [ ] **Step 5: Add `/claude-sessions` list command**
+- [ ] **Step 5: Add `/session` list command**
 
 Add a switch branch before `/sessions`:
 
 ```ts
-      case '/claude-sessions':
-      case '/cs': {
+      case '/session': {
         if (!this.ensureTelegramNativeCommand(adapter, msg.chatId)) return true;
         const scan = this.nativeDeps.scanNativeSessions ?? (() => scanClaudeNativeSessions());
         const candidates = await scan();
         if (candidates.length === 0) {
-          await adapter.send({ chatId: msg.chatId, text: 'No Claude Code history sessions found. Use Claude Code on this machine first, then run /claude-sessions again.' });
+          await adapter.send({ chatId: msg.chatId, text: 'No Claude Code history sessions found. Use Claude Code on this machine first, then run /session again.' });
           return true;
         }
 
@@ -1943,7 +1942,7 @@ Add a switch branch before `/sessions`:
           lines.push(`   <code>${this.escapeHtml(this.truncate(candidate.cwd ?? candidate.sourcePath, 100))}</code>`);
           lines.push(`   ${this.escapeHtml(this.truncate(candidate.preview, 100))}`);
         }
-        lines.push('', 'Use <code>/rc &lt;n&gt;</code> within 5 minutes to take over.');
+        lines.push('', 'Use <code>/resume &lt;n&gt;</code> within 5 minutes to take over.');
         this.nativeCandidateCache.set(this.chatKey(msg.channelType, msg.chatId), candidates);
         await adapter.send({ chatId: msg.chatId, html: lines.join('\n') });
         return true;
@@ -1952,22 +1951,21 @@ Add a switch branch before `/sessions`:
 
 Optimize later by computing `const sessions = await store.listSessions()` once before the loop.
 
-- [ ] **Step 6: Add `/resume-claude` and `/rc` command**
+- [ ] **Step 6: Add `/resume` command**
 
 Add a switch branch:
 
 ```ts
-      case '/resume-claude':
-      case '/rc': {
+      case '/resume': {
         if (!this.ensureTelegramNativeCommand(adapter, msg.chatId)) return true;
         const parsed = this.parseResumeArgs(msg.text);
         if (parsed.error || !parsed.target) {
-          await adapter.send({ chatId: msg.chatId, text: parsed.error ?? 'Usage: /resume-claude <n|current> [--cwd "D:\\path"]' });
+          await adapter.send({ chatId: msg.chatId, text: parsed.error ?? 'Usage: /resume <n|current> [cwd "D:\\path"]' });
           return true;
         }
         const cwdError = this.validateCwdOverride(parsed.cwdOverride);
         if (cwdError) {
-          await adapter.send({ chatId: msg.chatId, text: `Invalid --cwd: ${cwdError}` });
+          await adapter.send({ chatId: msg.chatId, text: `Invalid cwd: ${cwdError}` });
           return true;
         }
 
@@ -1978,7 +1976,7 @@ Add a switch branch:
           const binding = await this.router.resolve(msg.channelType, msg.chatId);
           existingImported = await store.getSession(binding.sessionId);
           if (!existingImported || existingImported.source !== 'claude-native' || !existingImported.sdkSessionId) {
-            await adapter.send({ chatId: msg.chatId, text: 'Current TLive session is not an imported native Claude session. Use /claude-sessions first.' });
+            await adapter.send({ chatId: msg.chatId, text: 'Current TLive session is not an imported native Claude session. Use /session first.' });
             return true;
           }
           const find = this.nativeDeps.findNativeSessionById ?? ((id: string) => findClaudeNativeSessionById(id));
@@ -2001,7 +1999,7 @@ Add a switch branch:
           const index = Number.parseInt(parsed.target, 10);
           const cached = this.nativeCandidateCache.get(this.chatKey(msg.channelType, msg.chatId));
           if (!cached || Number.isNaN(index) || index < 1 || index > cached.length) {
-            await adapter.send({ chatId: msg.chatId, text: 'Run /claude-sessions first, then use /rc <n> within 5 minutes.' });
+            await adapter.send({ chatId: msg.chatId, text: 'Run /session first, then use /resume <n> within 5 minutes.' });
             return true;
           }
           candidate = cached[index - 1];
@@ -2019,7 +2017,7 @@ Add a switch branch:
 
         const finalCwd = parsed.cwdOverride ?? candidate.cwd;
         if (!finalCwd || (!candidate.cwdExists && !parsed.cwdOverride)) {
-          await adapter.send({ chatId: msg.chatId, text: 'This session has missing or unknown cwd. Retry with: /rc <n> --cwd "D:\\absolute\\project"' });
+          await adapter.send({ chatId: msg.chatId, text: 'This session has missing or unknown cwd. Retry with: /resume <n> cwd "D:\\absolute\\project"' });
           return true;
         }
 
@@ -2175,8 +2173,8 @@ For `/sessions`, change preview and marker:
 For Telegram `/help`, add lines:
 
 ```ts
-            '<code>/claude-sessions</code> / <code>/cs</code> — List native Claude Code sessions',
-            '<code>/resume-claude &lt;n|current&gt;</code> / <code>/rc</code> — Take over native Claude session',
+            '<code>/session</code> — List native Claude Code sessions',
+            '<code>/resume &lt;n|current&gt;</code> — Take over native Claude session',
             '<code>/release</code> — Release Telegram takeover',
 ```
 
@@ -2185,7 +2183,7 @@ For Telegram `/help`, add lines:
 In `bridge/src/engine/bridge-manager.ts`, update `QUICK_COMMANDS`:
 
 ```ts
-const QUICK_COMMANDS = new Set(['/menu', '/new', '/status', '/verbose', '/hooks', '/sessions', '/session', '/help', '/perm', '/effort', '/stop', '/approve', '/pairings', '/runtime', '/settings', '/model', '/claude-sessions', '/cs', '/resume-claude', '/rc', '/release']);
+const QUICK_COMMANDS = new Set(['/menu', '/new', '/status', '/verbose', '/hooks', '/sessions', '/session', '/help', '/perm', '/effort', '/stop', '/approve', '/pairings', '/runtime', '/settings', '/model', '/resume', '/release']);
 ```
 
 Update `new CommandRouter(...)` call:
@@ -2308,7 +2306,7 @@ describe('SDKEngine native session guard', () => {
     await engine.handleMessage(a, { channelType: 'telegram', chatId: 'c1', userId: 'u1', text: 'hello', messageId: 'm1' }, provider());
 
     expect(store.saveMessage).not.toHaveBeenCalled();
-    expect(a.send).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('/resume-claude current') }));
+    expect(a.send).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('/resume current') }));
   });
 
   it('blocks ordinary messages when another chat owns the lease', async () => {
@@ -2395,7 +2393,7 @@ Add helper before `handleMessage()`:
       await adapter.send({ chatId: msg.chatId, text: `该 Claude session 当前由 ${maskLeaseOwner(refresh.lease.owner)} 接管。请等待对方 /release，或选择其他 session。` });
       return 'blocked';
     }
-    await adapter.send({ chatId: msg.chatId, text: '该 Claude session 当前已释放，未由 Telegram 接管。\n发送 /resume-claude current 重新接管，或 /new 开始新的 TLive 会话。' });
+    await adapter.send({ chatId: msg.chatId, text: '该 Claude session 当前已释放，未由 Telegram 接管。\n发送 /resume current 重新接管，或 /new 开始新的 TLive 会话。' });
     return 'blocked';
   }
 ```
@@ -2609,8 +2607,10 @@ In `README.md`, add a short Telegram command subsection near the existing TLive 
 ```md
 ### Telegram: native Claude Code sessions
 
-- `/claude-sessions` (`/cs`) — list recent native Claude Code sessions from this machine.
-- `/resume-claude <n|current>` (`/rc`) — take over a listed or current imported Claude Code session from Telegram.
+- `/session` — list recent native Claude Code sessions from this machine.
+- `/session all` — list all scanned native Claude Code sessions from this machine.
+- `/resume <n|current>` — take over a listed or current imported Claude Code session from Telegram.
+- `/resume <n|current> cwd "<absolute path>"` — override the working directory when resuming.
 - `/release` — release the Telegram takeover and show the desktop `claude --resume <session-id>` command.
 ```
 
@@ -2619,8 +2619,10 @@ In `README_CN.md`, add:
 ```md
 ### Telegram：接续原生 Claude Code 会话
 
-- `/claude-sessions`（`/cs`）— 列出本机最近的原生 Claude Code 会话。
-- `/resume-claude <n|current>`（`/rc`）— 在 Telegram 接管列表中的会话，或重新接管当前已导入会话。
+- `/session` — 列出本机最近的原生 Claude Code 会话。
+- `/session all` — 列出本机全部扫描到的原生 Claude Code 会话。
+- `/resume <n|current>` — 在 Telegram 接管列表中的会话，或重新接管当前已导入会话。
+- `/resume <n|current> cwd "<绝对路径>"` — 接管时覆盖工作目录。
 - `/release` — 释放 Telegram 接管，并显示桌面端 `claude --resume <session-id>` 命令。
 ```
 
@@ -2669,22 +2671,22 @@ Expected in current repo state: no output. If no output, do not add `bridge/dist
 Run the bridge normally, then in Telegram verify:
 
 ```text
-/cs
-/rc <n>
+/session
+/resume <n>
 <send one ordinary resumed message>
 /release
 <send ordinary message and confirm it is blocked>
-/rc current
+/resume current
 ```
 
 Expected:
 
-- `/cs` lists up to 10 native Claude Code sessions with index validity notice.
-- `/rc <n>` sends takeover status, recent context pages, and no empty prompt to Claude.
+- `/session` lists five native Claude Code sessions by default with index validity notice; `/session all` lists all scanned candidates.
+- `/resume <n>` sends takeover status, recent context pages, and no empty prompt to Claude.
 - The ordinary resumed message uses the existing native `sdkSessionId` path.
 - `/release` shows `claude --resume <session-id>` and keeps the binding.
 - Ordinary message after release is blocked before TLive message history save.
-- `/rc current` reacquires the lease and shows short recent context.
+- `/resume current` reacquires the lease and shows short recent context.
 
 Do not automatically run desktop `claude --resume`; leave it as a manual back-to-desktop check.
 
@@ -2703,11 +2705,11 @@ git commit -m "docs: document Telegram native Claude session commands"
 
 ### Spec coverage
 
-- Native JSONL scanning, cwd fallback, sidechain exclusion, dedupe, mtime prefilter, branch, and previews are covered in Task 3.
+- Native JSONL scanning, cwd validation, sidechain exclusion, dedupe, mtime prefilter, branch, and previews are covered in Task 3.
 - Recent context no-truncation, expansion, long assistant skip, page markers, and Telegram HTML escaping are covered in Task 4.
 - Imported `SessionData` fields and reuse-by-`sdkSessionId` are covered in Tasks 1 and 5.
 - Soft lease persistence, TTL, owner masking, refresh, release, and cleanup are covered in Tasks 1 and 2.
-- Telegram commands `/claude-sessions`, `/cs`, `/resume-claude`, `/rc`, and `/release` are covered in Tasks 6 and 7.
+- Telegram commands `/session`, `/session all`, `/resume`, and `/release` are covered in Tasks 6 and 7.
 - Runtime switch to Claude, `/new`, `/session`, `/runtime codex`, `/stop`, `/sessions`, and `/help` behavior are covered in Task 7.
 - Ordinary-message guard, guarded-message non-persistence, task-completion refresh, active-state check, and failure release are covered in Task 8.
 - Metadata preservation is covered in Task 9.

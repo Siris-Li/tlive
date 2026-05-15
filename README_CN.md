@@ -195,7 +195,7 @@ tlive hooks resume         # 恢复 Hook（IM 审批）
 - `/resume <n|current> cwd "<绝对路径>"` — 接管时覆盖工作目录。
 - `/release` — 释放 Telegram 接管，并显示桌面端 `claude --resume <session-id>` 命令。
 
-接管成功后，Telegram 会显示接管工作目录、可用时显示 git 分支、桌面端 resume 命令、租约时间，以及当前 Model/Effort/Perm 状态。默认 Effort 显示为 `xhigh`，但不会主动向 SDK 传 effort；只有显式运行 `/effort` 后才会传入对应设置。
+接管成功后，Telegram 会显示接管工作目录、可用时显示 git 分支、桌面端 resume 命令、租约时间，以及当前 Model/Effort/Perm 状态。cwd 未知或路径缺失的 session 不会自动接管，需要显式提供 `cwd "<绝对路径>"`。默认 Effort 显示为 `xhigh`，但不会主动向 SDK 传 effort；只有显式运行 `/effort` 后才会传入对应设置。
 
 ### 响应状态卡片
 

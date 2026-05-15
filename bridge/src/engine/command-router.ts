@@ -706,9 +706,10 @@ export class CommandRouter {
       const candidate = displayed[i];
       const importedSession = importedSessionsBySdkId.get(candidate.sessionId);
       const lease = await leaseService.getActive(candidate.sessionId);
-      const markers = this.buildCandidateMarkers(candidate, lease, owner);
+      const existingWorkingDirectory = importedSession?.workingDirectory;
+      const markers = this.buildCandidateMarkers(candidate, lease, owner, existingWorkingDirectory);
       const preview = candidate.nativePreview || candidate.preview || EMPTY_PREVIEW;
-      const resumeCwd = this.resolveDefaultResumeWorkingDirectory(candidate, importedSession?.workingDirectory);
+      const resumeCwd = this.resolveDisplayResumeWorkingDirectory(candidate, existingWorkingDirectory);
       const date = this.formatShortDate(candidate.lastActivityAt);
       const markerSuffix = markers.length > 0 ? ` · <i>${this.escapeHtml(markers.join(' · '))}</i>` : '';
       lines.push(
@@ -738,6 +739,7 @@ export class CommandRouter {
     candidate: ClaudeNativeSessionCandidate,
     lease: NativeSessionLease | null,
     owner: string,
+    existingWorkingDirectory?: string,
   ): string[] {
     const markers: string[] = [];
 
@@ -745,10 +747,12 @@ export class CommandRouter {
       markers.push(lease.owner === owner ? '🔒 yours' : `🔒 ${maskLeaseOwner(lease.owner)}`);
     }
 
-    if (!candidate.cwd || candidate.cwdSource === 'unknown') {
-      markers.push('⚠️ cwd unknown');
-    } else if (!candidate.cwdExists) {
-      markers.push('⚠️ path missing');
+    if (!this.isExistingDirectory(existingWorkingDirectory)) {
+      if (!candidate.cwd || candidate.cwdSource === 'unknown') {
+        markers.push('⚠️ cwd unknown');
+      } else if (!candidate.cwdExists) {
+        markers.push('⚠️ path missing');
+      }
     }
 
     if (candidate.gitBranch) {
@@ -758,8 +762,12 @@ export class CommandRouter {
     return markers;
   }
 
-  private resolveDefaultResumeWorkingDirectory(candidate: ClaudeNativeSessionCandidate, existingWorkingDirectory?: string): string {
-    return existingWorkingDirectory || candidate.cwd || getBridgeContext().defaultWorkdir;
+  private resolveDisplayResumeWorkingDirectory(candidate: ClaudeNativeSessionCandidate, existingWorkingDirectory?: string): string {
+    if (this.isExistingDirectory(existingWorkingDirectory)) {
+      return existingWorkingDirectory;
+    }
+
+    return candidate.cwd || 'cwd unavailable';
   }
 
   private async handleResumeClaude(
@@ -831,7 +839,7 @@ export class CommandRouter {
       return true;
     }
 
-    const cwdValidation = this.resolveResumeWorkingDirectory(candidate, parsed.cwdOverride, existingImported?.workingDirectory);
+    const cwdValidation = this.resolveResumeWorkingDirectory(candidate, parsed.cwdOverride, existingImported?.workingDirectory, parsed.target);
     if (!cwdValidation.ok || !cwdValidation.cwd) {
       await adapter.send({ chatId: msg.chatId, text: cwdValidation.error ?? this.resumeUsage() });
       return true;
@@ -929,12 +937,26 @@ export class CommandRouter {
     candidate: ClaudeNativeSessionCandidate,
     cwdOverride?: string,
     existingWorkingDirectory?: string,
+    target = '<n|current>',
   ): { ok: true; cwd: string } | { ok: false; error: string } {
     if (cwdOverride) {
       return this.validateDirectoryOverride(cwdOverride);
     }
 
-    return { ok: true, cwd: this.resolveDefaultResumeWorkingDirectory(candidate, existingWorkingDirectory) };
+    if (this.isExistingDirectory(existingWorkingDirectory)) {
+      return { ok: true, cwd: existingWorkingDirectory };
+    }
+
+    if (candidate.cwd && candidate.cwdExists) {
+      return { ok: true, cwd: candidate.cwd };
+    }
+
+    const usage = `/resume ${target} cwd "absolute path"`;
+    if (!candidate.cwd || candidate.cwdSource === 'unknown') {
+      return { ok: false, error: `⚠️ Claude session cwd is unavailable. Use ${usage}.` };
+    }
+
+    return { ok: false, error: `⚠️ Claude session cwd path is missing: ${candidate.cwd}. Use ${usage}.` };
   }
 
   private validateDirectoryOverride(cwdOverride: string): { ok: true; cwd: string } | { ok: false; error: string } {
@@ -974,7 +996,7 @@ export class CommandRouter {
       sourcePath: current.session.sourcePath ?? '',
       cwd: current.session.workingDirectory || undefined,
       cwdSource: current.session.workingDirectory ? 'project-dir' : 'unknown',
-      cwdExists: current.session.workingDirectory ? existsSync(current.session.workingDirectory) : false,
+      cwdExists: this.isExistingDirectory(current.session.workingDirectory),
       lastActivityAt: current.session.lastNativeActivityAt ?? current.session.importedAt ?? current.session.createdAt,
       preview: current.session.nativePreview ?? EMPTY_PREVIEW,
       nativePreview: current.session.nativePreview ?? EMPTY_PREVIEW,
@@ -1089,6 +1111,18 @@ export class CommandRouter {
       hour: '2-digit',
       minute: '2-digit',
     });
+  }
+
+  private isExistingDirectory(path?: string): path is string {
+    if (!path || !existsSync(path)) {
+      return false;
+    }
+
+    try {
+      return statSync(path).isDirectory();
+    } catch {
+      return false;
+    }
   }
 
   private escapeHtml(text: string): string {

@@ -18,7 +18,7 @@ The missing pieces are discovery of native Claude Code JSONL files, importing on
 
 After Telegram resumes a native Claude Code session, the Claude Agent SDK receives the native `sessionId`, so Claude Code should continue with the previous conversation context. The model can use the prior history just like desktop `claude --resume <session-id>` would.
 
-Telegram will not automatically display or replay the full prior transcript in this first version. `/claude-sessions` shows a short one-line preview for each candidate. After `/resume-claude <n>` succeeds, TLive sends recent visible context from the selected native JSONL so the user can orient themselves before typing.
+Telegram will not automatically display or replay the full prior transcript in this first version. `/session` shows a short one-line preview for each candidate. After `/resume <n>` succeeds, TLive sends recent visible context from the selected native JSONL so the user can orient themselves before typing.
 
 The recent-history display is only for the human in Telegram. It is not imported into TLive message history because Claude Code already resumes from the native session id.
 
@@ -47,9 +47,10 @@ Add three small modules and keep command handling thin:
 
 `CommandRouter` adds Telegram-only commands:
 
-- `/claude-sessions` and short alias `/cs`
-- `/resume-claude <n|current>` and short alias `/rc <n|current>`
-- `/resume-claude <n|current> --cwd <absolute-path>`
+- `/session` to list native Claude Code sessions
+- `/session all` to show every scanned candidate instead of the default first five
+- `/resume <n|current>` to take over a listed or current imported native session
+- `/resume <n|current> cwd "<absolute-path>"` to override the working directory
 - `/release`
 
 For non-Telegram channels, these commands return a clear “currently Telegram only” message instead of passing through to Claude.
@@ -58,7 +59,7 @@ For non-Telegram channels, these commands return a clear “currently Telegram o
 
 ## Scanner Behavior
 
-`/claude-sessions` scans native Claude Code JSONL files, sorts by latest JSONL activity descending, and shows the most recent 10 sessions. Final sort uses latest JSONL `timestamp`; file `mtime` is only a prefilter and fallback.
+`/session` scans native Claude Code JSONL files, sorts by latest JSONL activity descending, and shows the first five sessions by default. `/session all` shows every scanned candidate. Final sort uses latest JSONL `timestamp`; file `mtime` is only a prefilter and fallback.
 
 For each JSONL file:
 
@@ -78,11 +79,11 @@ For each JSONL file:
 
 Sessions are deduplicated by native `sessionId`; keep the candidate with the newest `lastActivityAt`, and if tied prefer the one whose cwd is an existing directory.
 
-Unknown or missing cwd sessions are listed but cannot be resumed without an explicit valid `--cwd` override.
+Unknown or missing cwd sessions are listed but cannot be resumed without an explicit valid `cwd` override.
 
 ## Recent Context Display
 
-After successful `/resume-claude`, TLive re-reads the selected JSONL to produce the recent context. The list candidate cache is used only to bind the user-selected index to a stable session.
+After successful `/resume`, TLive re-reads the selected JSONL to produce the recent context. The list candidate cache is used only to bind the user-selected index to a stable session.
 
 Default behavior:
 
@@ -106,54 +107,56 @@ Filtering rules:
 - Assistant messages over about 6000 characters are not selected by default. Instead, insert a short skip notice at that position and continue looking backward for enough complete displayable messages. The skip notice does not count toward the 3-message target.
 - Very long user messages are still shown completely by splitting pages.
 
-`/resume-claude current` also shows recent context, but targets the latest 1-3 complete visible messages.
+`/resume current` also shows recent context, but targets the latest 1-3 complete visible messages.
 
-If the recent-context reread fails, TLive still allows resume when the cached selection is otherwise valid, but reports that recent context is unavailable. If reread succeeds but the JSONL `sessionId` differs from the cached selected `sessionId`, reject and ask the user to run `/claude-sessions` again.
+If the recent-context reread fails, TLive still allows resume when the cached selection is otherwise valid, but reports that recent context is unavailable. If reread succeeds but the JSONL `sessionId` differs from the cached selected `sessionId`, reject and ask the user to run `/session` again.
 
 ## Telegram User Experience
 
-`/claude-sessions` returns a Telegram-formatted list with stable indices cached for 5 minutes per Telegram chat:
+`/session` returns a Telegram-formatted list with stable indices cached for 5 minutes per Telegram chat:
 
 ```text
 📋 Claude Code Sessions
 
-1. tlive · May 06 12:34 · main · imported
+1. tlive · May 06 12:34 · main
    D:\SirisLi\GitHub\tlive
    继续调查/实现 TLive...
 2. Desktop · May 05 21:08 · locked by you
    D:\Desktop
    ok。我准备 compact...
 
-Use /rc <n> within 5 minutes to take over
+Use /resume <n> within 5 minutes to take over
 ```
 
 List display rules:
 
-- Show up to 10 sessions.
+- Show up to 5 sessions by default; `/session all` shows every scanned candidate.
 - Show basename first; include enough parent/full path context to disambiguate duplicate basenames. Full cwd may be truncated in this list.
 - List preview may be truncated.
 - Display latest `gitBranch` when available.
-- Markers are ordered by importance: `locked by you` / `locked`, `path missing` / `cwd unknown`, `imported`, then branch.
-- If a session is both locked and path missing, `/resume-claude` reports the lock first.
+- Markers are ordered by importance: `locked by you` / `locked`, `path missing` / `cwd unknown`, then branch.
+- If a session is both locked and path missing, `/resume` reports the lock first.
 - Show active lease status in the list. Current chat owner appears as `locked by you`; other owners appear as `locked` with masked owner when needed.
 - Footer says indices are valid for 5 minutes.
 - No inline buttons in the first version.
 - No search parameter in the first version.
 
-`/resume-claude <n>` uses the current chat’s cached `/claude-sessions` result. If the cache is missing or expired, it tells the user to run `/claude-sessions` again. It does not silently rescan and reinterpret the number. Successful resume clears the cache.
+`/resume <n>` uses the current chat’s cached `/session` result. If the cache is missing or expired, it tells the user to run `/session` again. It does not silently rescan and reinterpret the number. Successful resume clears the cache.
 
-`/resume-claude current` uses the current binding when it points to an imported native session. It does not require a candidate cache. If `sourcePath` is missing, TLive may scan the most recent 100 native JSONLs for a matching `sdkSessionId` and update `sourcePath`; it does not change cwd unless `--cwd` is provided.
+`/resume current` uses the current binding when it points to an imported native session. It does not require a candidate cache. If `sourcePath` is missing, TLive may scan the most recent 100 native JSONLs for a matching `sdkSessionId` and update `sourcePath`; it does not change cwd unless `cwd` is provided.
 
-`--cwd` behavior:
+`cwd` behavior:
 
 - Works for both numeric and `current` resume.
 - Requires an absolute path. Relative paths are rejected.
-- Supports quoted Windows paths with spaces, e.g. `--cwd "D:\My Projects\foo"`.
+- Supports quoted Windows paths with spaces, e.g. `cwd "D:\My Projects\foo"`.
 - Unquoted paths containing spaces are rejected with usage guidance.
 - Supports UNC absolute paths if Node treats them as absolute and they exist.
 - Must point to an existing directory, not a file.
 - Does not require basename or git repo matching.
 - Overrides the imported session’s `workingDirectory` and reports old cwd → new cwd.
+- Without an explicit `cwd`, a valid existing imported `workingDirectory` is reused first; otherwise a scanner cwd is used only if `cwdExists` is true.
+- If cwd is unknown or the scanned path is missing, `/resume` rejects and tells the user to provide `cwd "absolute path"` instead of falling back to the bridge default workdir.
 
 Successful takeover status includes:
 
@@ -175,11 +178,11 @@ Successful takeover status includes:
 - Releases the lease, closes active TLive LiveSession, clears current chat candidate cache, and keeps the binding/imported session record.
 - Replies with full cwd and `claude --resume <session-id>` guidance for returning to desktop. If cwd is unknown/missing, tell the user to run the command from the correct project directory.
 
-After `/release`, ordinary messages to that imported native session are blocked until explicit `/resume-claude current`. The prompt is:
+After `/release`, ordinary messages to that imported native session are blocked until explicit `/resume current`. The prompt is:
 
 ```text
 该 Claude session 当前已释放，未由 Telegram 接管。
-发送 /resume-claude current 重新接管，或 /new 开始新的 TLive 会话。
+发送 /resume current 重新接管，或 /new 开始新的 TLive 会话。
 ```
 
 ## Imported Session Shape
@@ -212,9 +215,9 @@ nativePreview?: string;
 
 Existing `ConversationEngine` and `SDKEngine` must preserve extra session fields when updating `sdkSessionId`; otherwise imported metadata would be lost after the next query result.
 
-`/sessions` should continue sorting by existing `createdAt` semantics. Imported native sessions should appear in `/sessions` with a `[Claude native]` marker. Preview priority is: first TLive user message if present, otherwise `nativePreview`.
+Existing non-Telegram `/sessions` behavior should continue sorting by existing `createdAt` semantics. Imported native sessions should appear there with a `[Claude native]` marker. Preview priority is: first TLive user message if present, otherwise `nativePreview`.
 
-`/session <n>` can switch to imported native sessions, but it does not acquire a native lease. Ordinary messages remain guarded until `/resume-claude current` succeeds. If `/session <n>` switches away from a currently leased native session, release that lease first; if work is running, refuse the switch.
+On Telegram, `/session <n>` is not a switch command; users must use `/resume <n>` to acquire a native lease. Existing non-Telegram session-switch behavior remains separate from the native Claude takeover flow.
 
 ## Soft Lease Design
 
@@ -245,7 +248,7 @@ Rules:
 
 - Owner is `telegram:<chatId>`. Store `ownerUserId` only as auxiliary metadata.
 - Mask owners in user-facing text as `telegram:*1234` using only the last four chat id characters.
-- `/resume-claude <n|current>` acquires a lease when none exists or when the existing lease has expired.
+- `/resume <n|current>` acquires a lease when none exists or when the existing lease has expired.
 - Same owner chat may re-acquire and refresh its own lease.
 - Another Telegram chat is rejected while a non-expired lease exists. No force takeover in the first version.
 - Different Telegram chats may hold leases for different native `sdkSessionId`s.
@@ -253,7 +256,7 @@ Rules:
 - Lease TTL is 30 idle minutes. A task running longer than 30 minutes does not expire mid-run; refresh when the user message is accepted and when the task completes.
 - `/stop` keeps the lease and refreshes `lastActiveAt`, even if no active execution was found.
 - Ordinary Telegram commands refresh the current native lease when owner matches, except `/release`.
-- If a command sees an expired lease, clean it up but do not automatically reacquire; `/resume-claude current` is required.
+- If a command sees an expired lease, clean it up but do not automatically reacquire; `/resume current` is required.
 - `/new`, `/session`, and `/runtime codex` release the current native lease before changing session/runtime when no work is running; if work is running, they refuse and ask the user to `/stop` or wait.
 - `/settings` and `/perm` do not affect the lease.
 - `/release`, `/new`, `/session`, and `/runtime` clear the current chat’s candidate cache when they release or change the active session/runtime. `/stop` does not clear candidate cache.
@@ -262,9 +265,9 @@ This is a soft TLive-side lock. It does not prevent a desktop Claude Code proces
 
 ## Runtime and Message Flow
 
-`/resume-claude` imports/binds/acquires lease/displays context only. It does not start Claude and does not send an empty prompt. The LiveSession starts only when the next ordinary user message is accepted.
+`/resume` imports/binds/acquires lease/displays context only. It does not start Claude and does not send an empty prompt. The LiveSession starts only when the next ordinary user message is accepted.
 
-`/resume-claude` automatically switches the chat runtime to Claude if needed, because the command explicitly targets native Claude Code sessions. It does not automatically change `/settings` scope or `/perm` mode.
+`/resume` automatically switches the chat runtime to Claude if needed, because the command explicitly targets native Claude Code sessions. It does not automatically change `/settings` scope or `/perm` mode.
 
 TLive must not inject “this came from Telegram” or similar text into the first resumed prompt. Telegram is the transport layer; the native Claude history should not be polluted.
 
@@ -272,23 +275,23 @@ The ordinary-message guard runs before saving the user message or creating a Liv
 
 - If current binding is not an imported native session, continue existing behavior.
 - If binding is an imported native session and owner lease is valid, refresh lease and continue.
-- If lease is missing, released, expired, or owned by another Telegram chat, do not save the message and do not call Claude. Send a clear prompt to `/resume-claude current` or wait/release as appropriate.
+- If lease is missing, released, expired, or owned by another Telegram chat, do not save the message and do not call Claude. Send a clear prompt to `/resume current` or wait/release as appropriate.
 
 If Claude Agent SDK resume fails later when the first real message starts Claude, report the failure and release the lease. Do not silently fall back to a new conversation.
 
 ## Candidate Cache
 
-`/claude-sessions` stores the ordered candidate list in memory by chat key for 5 minutes. It is not persisted. Bridge restart requires listing again.
+`/session` stores the ordered candidate list in memory by chat key for 5 minutes. It is not persisted. Bridge restart requires listing again.
 
 Cache behavior:
 
-- `/resume-claude <n>` requires a valid cache.
-- Cache expiry requires running `/claude-sessions` again; do not show or reuse an expired list.
-- `/resume-claude current` does not need the cache.
+- `/resume <n>` requires a valid cache.
+- Cache expiry requires running `/session` again; do not show or reuse an expired list.
+- `/resume current` does not need the cache.
 - Runtime/settings/permission changes do not invalidate candidate cache.
-- A new `/claude-sessions` overwrites the cache.
+- A new `/session` overwrites the cache.
 - Successful numeric resume clears the cache.
-- `/release` clears the cache, but `/resume-claude current` remains available because it uses binding/imported session state.
+- `/release` clears the cache, but `/resume current` remains available because it uses binding/imported session state.
 
 ## Logging
 
@@ -303,19 +306,19 @@ Do not log message content or JSONL row contents.
 
 ## Error Handling
 
-- Missing `~/.claude/projects` or no sessions: `/claude-sessions` says no Claude Code history sessions were found and suggests using Claude Code on this machine first.
+- Missing `~/.claude/projects` or no sessions: `/session` says no Claude Code history sessions were found and suggests using Claude Code on this machine first.
 - Scanner skips malformed JSONL rows.
 - Unreadable JSONL files are skipped.
 - Obvious sidechain sessions are hidden from the default list.
-- Invalid index: `/resume-claude` asks the user to run `/claude-sessions` again.
-- Missing or expired candidate cache: ask the user to run `/claude-sessions` again.
-- `cwd unknown`: reject resume unless `--cwd` is provided.
-- `path missing`: reject resume unless `--cwd` points to an existing directory.
+- Invalid index: `/resume` asks the user to run `/session` again.
+- Missing or expired candidate cache: ask the user to run `/session` again.
+- `cwd unknown`: reject resume unless a valid existing imported cwd is available or explicit `cwd` is provided.
+- `path missing`: reject resume unless a valid existing imported cwd is available or explicit `cwd` points to an existing directory.
 - Locked by another chat: reject before cwd validation and show masked owner/remaining time.
-- Runtime is not Claude: `/resume-claude` switches the chat runtime to Claude and reports it.
+- Runtime is not Claude: `/resume` switches the chat runtime to Claude and reports it.
 - Live session creation or resume failure: release the lease and report failure. Do not delete the imported session record and do not fallback to a new session.
 - JSONL reread failure for recent context: allow resume without context and report preview unavailable.
-- JSONL reread session id mismatch: reject and ask the user to run `/claude-sessions` again.
+- JSONL reread session id mismatch: reject and ask the user to run `/session` again.
 
 ## Tests
 
@@ -351,14 +354,14 @@ Store and lease:
 
 Command router / native Claude commands:
 
-- `/claude-sessions` and `/cs` format Telegram list output with markers and 5-minute cache notice.
+- `/session` formats Telegram list output with markers and 5-minute cache notice.
 - Non-Telegram native commands return Telegram-only unsupported text.
-- `/resume-claude <n>` / `/rc <n>` requires cached candidates.
+- `/resume <n>` requires cached candidates.
 - Numeric resume saves or reuses imported session, binding, and lease.
 - Existing imported sessions are reused by `sdkSessionId`.
-- Missing path rejects resume; valid absolute `--cwd` override accepts and updates cwd.
+- Missing path rejects resume; valid absolute `cwd` override accepts and updates cwd.
 - Quoted Windows paths with spaces parse correctly; relative paths and file paths reject.
-- `/resume-claude current` works from current binding without candidate cache and supports `--cwd`.
+- `/resume current` works from current binding without candidate cache and supports `cwd`.
 - `/release` releases lease, closes LiveSession, clears candidate cache, keeps binding, and shows desktop resume guidance.
 - `/release`, `/new`, `/session`, and `/runtime codex` reject while work is running.
 - `/new`, `/session`, and `/runtime codex` auto-release native lease when safe.
@@ -383,15 +386,15 @@ Manual verification after implementation:
 
 - Run Vitest.
 - Run bridge build.
-- Start real TLive bridge and verify in Telegram: `/cs`, `/rc <n>`, recent context display, a resumed user message, `/release`, blocked ordinary message after release, `/rc current`.
+- Start real TLive bridge and verify in Telegram: `/session`, `/resume <n>`, recent context display, a resumed user message, `/release`, blocked ordinary message after release, `/resume current`.
 - Do not automatically run desktop `claude --resume`; list it as a manual back-to-desktop check.
 
 ## Documentation and Build
 
 Implementation should update Telegram help and the README/README_CN or command docs with a short command list:
 
-- `/claude-sessions` (`/cs`) — list native Claude Code sessions
-- `/resume-claude <n|current>` (`/rc`) — take over a native Claude Code session
+- `/session` — list native Claude Code sessions
+- `/resume <n|current>` — take over a native Claude Code session
 - `/release` — release Telegram takeover
 
 Do not write a long tutorial in the first implementation.
@@ -410,6 +413,6 @@ Run `npm test` and `npm run build` under `bridge`. Do not hand-edit `bridge/dist
 - Scanning non-default Claude project paths or multiple Claude homes.
 - WSL/Linux path auto-conversion.
 - Codex native session support.
-- Search parameters for `/claude-sessions`.
+- Search parameters for `/session`.
 - Config flags or env vars for this feature.
 - Importing or replaying the full native Claude message history into TLive message history.

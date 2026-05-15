@@ -204,7 +204,7 @@ tlive hooks resume         # Resume hooks (IM approval)
 - `/resume <n|current> cwd "<absolute path>"` — override the working directory when resuming.
 - `/release` — release the Telegram takeover and show the desktop `claude --resume <session-id>` command.
 
-When a session is resumed, Telegram shows the resume cwd, git branch when available, desktop resume command, lease time, and current Model/Effort/Perm status. Default effort is displayed as `xhigh` while leaving Claude Code's SDK effort unset unless you explicitly run `/effort`.
+When a session is resumed, Telegram shows the resume cwd, git branch when available, desktop resume command, lease time, and current Model/Effort/Perm status. Sessions with unknown or missing cwd are not resumed unless you provide `cwd "<absolute path>"`. Default effort is displayed as `xhigh` while leaving Claude Code's SDK effort unset unless you explicitly run `/effort`.
 
 ### Response status cards
 
