@@ -9,6 +9,7 @@ import type {
 import type { ClaudeNativeSessionCandidate } from '../native/claude-native-scanner.js';
 import {
   findImportedSessionBySdkSessionId,
+  importCodexNativeSession,
   importClaudeNativeSession,
 } from '../native/claude-session-importer.js';
 
@@ -220,5 +221,42 @@ describe('claude-session-importer', () => {
 
     expect(await findImportedSessionBySdkSessionId(store, 'sdk-match')).toEqual(firstNative);
     expect(await findImportedSessionBySdkSessionId(store, 'missing-sdk')).toBeNull();
+  });
+
+  it('creates a Codex native imported session without colliding with Claude imports', async () => {
+    const store = new MemoryBridgeStore([
+      {
+        id: 'claude-import',
+        workingDirectory: 'D:\\repo\\claude',
+        sdkSessionId: 'shared-sdk-id',
+        source: 'claude-native',
+        createdAt: '2026-05-05T10:00:00.000Z',
+      },
+    ]);
+    const candidate = makeCandidate({
+      sessionId: 'shared-sdk-id',
+      cwd: 'D:\\repo\\codex',
+      sourcePath: 'C:\\Users\\SirisLi\\.codex\\sessions\\shared-sdk-id.jsonl',
+      lastActivityAt: '2026-05-06T12:20:00.000Z',
+      nativePreview: 'codex imported preview',
+    });
+
+    const session = await importCodexNativeSession(store, candidate);
+
+    expect(session).toEqual({
+      id: `session-imported-d-sdk-id-${NOW_MS}`,
+      workingDirectory: 'D:\\repo\\codex',
+      sdkSessionId: 'shared-sdk-id',
+      source: 'codex-native',
+      sourcePath: 'C:\\Users\\SirisLi\\.codex\\sessions\\shared-sdk-id.jsonl',
+      importedAt: NOW_ISO,
+      lastNativeActivityAt: '2026-05-06T12:20:00.000Z',
+      nativePreview: 'codex imported preview',
+      createdAt: NOW_ISO,
+    });
+    expect(await findImportedSessionBySdkSessionId(store, 'shared-sdk-id', 'codex-native')).toEqual(session);
+    expect(await findImportedSessionBySdkSessionId(store, 'shared-sdk-id', 'claude-native')).toEqual(
+      expect.objectContaining({ id: 'claude-import' }),
+    );
   });
 });

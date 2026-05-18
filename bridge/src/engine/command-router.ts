@@ -14,23 +14,32 @@ import {
   scanClaudeNativeSessions,
 } from '../native/claude-native-scanner.js';
 import {
+  findCodexNativeSessionById,
+  scanCodexNativeSessions,
+} from '../native/codex-native-scanner.js';
+import {
   NativeSessionLeaseService,
   NATIVE_LEASE_TTL_MINUTES,
   maskLeaseOwner,
   nativeLeaseOwner,
 } from '../native/native-session-lease.js';
 import { renderRecentContextPages } from '../native/recent-context.js';
-import { importClaudeNativeSession } from '../native/claude-session-importer.js';
+import { importNativeSession } from '../native/claude-session-importer.js';
 import { NativeCommandCandidateCache } from './native-command-cache.js';
 import { existsSync, mkdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { homedir } from 'node:os';
 import type { ChannelBinding, NativeSessionLease, SessionData } from '../store/interface.js';
 
+type NativeSessionSource = NonNullable<SessionData['source']>;
+type RuntimeName = 'claude' | 'codex';
+
 interface NativeCommandDeps {
   isChatActive?: (channelType: string, chatId: string) => boolean;
   scanNativeSessions?: () => Promise<ClaudeNativeSessionCandidate[]>;
   findNativeSessionById?: (sessionId: string) => Promise<ClaudeNativeSessionCandidate | null>;
+  scanCodexNativeSessions?: () => Promise<ClaudeNativeSessionCandidate[]>;
+  findCodexNativeSessionById?: (sessionId: string) => Promise<ClaudeNativeSessionCandidate | null>;
   leaseService?: NativeSessionLeaseService;
   candidateCache?: NativeCommandCandidateCache;
 }
@@ -52,6 +61,7 @@ export class CommandRouter {
   private controlPanel?: ControlPanel;
   private readonly nativeDeps?: NativeCommandDeps;
   private readonly fallbackCandidateCache = new NativeCommandCandidateCache();
+  private readonly defaultRuntime: RuntimeName;
 
   constructor(
     private state: SessionStateManager,
@@ -62,8 +72,10 @@ export class CommandRouter {
     private permissions: { clearSessionWhitelist(): void },
     private onNewSession?: (channelType: string, chatId: string) => void,
     nativeDeps?: NativeCommandDeps,
+    defaultRuntime: RuntimeName = 'claude',
   ) {
     this.nativeDeps = nativeDeps;
+    this.defaultRuntime = defaultRuntime;
   }
 
   private static MENU_HINT = '\n\n💡 Tip: Use /menu for the new control panel';
@@ -80,7 +92,7 @@ export class CommandRouter {
     if (TELEGRAM_ONLY_NATIVE_COMMANDS.has(cmd) && adapter.channelType !== 'telegram') {
       await adapter.send({
         chatId: msg.chatId,
-        text: '⚠️ These Claude native session commands are available only in Telegram chats.',
+        text: '⚠️ These native session commands are available only in Telegram chats.',
       });
       return true;
     }
@@ -287,7 +299,9 @@ export class CommandRouter {
           const firstUser = msgs.find(m => m.role === 'user');
           const previewBase = firstUser?.content ?? s.nativePreview ?? EMPTY_PREVIEW;
           const preview = previewBase.length > 40 ? previewBase.slice(0, 37) + '...' : previewBase;
-          const nativePrefix = s.source === 'claude-native' ? '[Claude native] ' : '';
+          const nativePrefix = this.isNativeSessionSource(s.source)
+            ? `[${this.resumeTitleForSource(s.source)} native] `
+            : '';
           lines.push(`${i + 1}. ${date} — ${nativePrefix}${preview}${marker}`);
         }
 
@@ -316,7 +330,7 @@ export class CommandRouter {
       case '/session': {
         if (adapter.channelType === 'telegram') {
           if (parts.length === 1 || parts[1]?.toLowerCase() === 'all') {
-            return this.handleClaudeSessions(adapter, msg, parts);
+            return this.handleNativeSessions(adapter, msg, parts);
           }
           await adapter.send({ chatId: msg.chatId, text: this.resumeUsage() });
           return true;
@@ -389,7 +403,7 @@ export class CommandRouter {
             this.getCandidateCache().clear(this.chatKey(msg.channelType, msg.chatId));
           }
 
-          const prevRuntime = this.state.getRuntime(msg.channelType, msg.chatId) || 'claude';
+          const prevRuntime = this.getRuntime(msg.channelType, msg.chatId);
           this.state.setRuntime(msg.channelType, msg.chatId, runtime as 'claude' | 'codex');
           if (prevRuntime !== runtime) {
             const newSessionId = `session-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
@@ -400,7 +414,7 @@ export class CommandRouter {
           const text = `${icons[runtime] || '🔄'} Runtime: **${runtime}**`;
           await adapter.send({ chatId: msg.chatId, text });
         } else {
-          const current = this.state.getRuntime(msg.channelType, msg.chatId) || 'claude';
+          const current = this.getRuntime(msg.channelType, msg.chatId);
           const codexStatus = await checkCodexAvailable() ? '✅' : '❌ (not installed)';
           const text = `🔄 Runtime: **${current}**\nUsage: \`/runtime claude|codex\`\nclaude: ✅ · codex: ${codexStatus}`;
           await adapter.send({ chatId: msg.chatId, text });
@@ -427,7 +441,7 @@ export class CommandRouter {
       case '/settings': {
         const llm = getBridgeContext().llm;
         const arg = parts[1]?.toLowerCase();
-        const runtime = this.state.getRuntime(msg.channelType, msg.chatId) || 'claude';
+        const runtime = this.getRuntime(msg.channelType, msg.chatId);
 
         if (runtime === 'codex' || !(llm instanceof ClaudeSDKProvider)) {
           const text = [
@@ -481,7 +495,7 @@ export class CommandRouter {
         return true;
       }
       case '/resume': {
-        return this.handleResumeClaude(adapter, msg, parts);
+        return this.handleResumeNative(adapter, msg, parts);
       }
       case '/resume-claude':
       case '/resume_claude':
@@ -499,9 +513,9 @@ export class CommandRouter {
             '',
             '<code>/menu</code> — ⚙️ <b>Control Panel</b> ✨',
             '<code>/new</code> — New conversation',
-            '<code>/session</code> — Claude native session list',
-            '<code>/resume &lt;n|current&gt;</code> — Resume Claude native session',
-            '<code>/release</code> — Release Claude native lease',
+            '<code>/session</code> — Native session list for current runtime',
+            '<code>/resume &lt;n|current&gt;</code> — Resume native session',
+            '<code>/release</code> — Release native session lease',
             '',
             '<i>Legacy (use /menu instead):</i>',
             '<code>/perm</code> · <code>/effort</code>',
@@ -633,10 +647,34 @@ export class CommandRouter {
     return this.nativeDeps?.candidateCache ?? this.fallbackCandidateCache;
   }
 
-  private async findImportedSession(sdkSessionId: string): Promise<SessionData | undefined> {
+  private getRuntime(channelType: string, chatId: string): RuntimeName {
+    return this.state.getRuntime(channelType, chatId) || this.defaultRuntime;
+  }
+
+  private sourceForRuntime(runtime: RuntimeName): NativeSessionSource {
+    return runtime === 'codex' ? 'codex-native' : 'claude-native';
+  }
+
+  private runtimeForSource(source: NativeSessionSource): RuntimeName {
+    return source === 'codex-native' ? 'codex' : 'claude';
+  }
+
+  private labelForSource(source: NativeSessionSource): string {
+    return source === 'codex-native' ? 'Codex' : 'Claude Code';
+  }
+
+  private resumeTitleForSource(source: NativeSessionSource): string {
+    return source === 'codex-native' ? 'Codex' : 'Claude';
+  }
+
+  private resumeCommandForSource(source: NativeSessionSource, sessionId: string): string {
+    return source === 'codex-native' ? `codex resume ${sessionId}` : `claude --resume ${sessionId}`;
+  }
+
+  private async findImportedSession(sdkSessionId: string, source: NativeSessionSource): Promise<SessionData | undefined> {
     const { store } = getBridgeContext();
     return (await store.listSessions()).find(session =>
-      session.source === 'claude-native' && session.sdkSessionId === sdkSessionId,
+      session.source === source && session.sdkSessionId === sdkSessionId,
     );
   }
 
@@ -651,11 +689,15 @@ export class CommandRouter {
     }
 
     const session = await store.getSession(binding.sessionId);
-    if (!session || session.source !== 'claude-native' || !session.sdkSessionId) {
+    if (!session || !this.isNativeSessionSource(session.source) || !session.sdkSessionId) {
       return null;
     }
 
     return { binding, session };
+  }
+
+  private isNativeSessionSource(source: SessionData['source']): source is NativeSessionSource {
+    return source === 'claude-native' || source === 'codex-native';
   }
 
   private async refreshCurrentNativeLeaseIfOwned(channelType: string, chatId: string): Promise<void> {
@@ -676,28 +718,32 @@ export class CommandRouter {
     await this.getLeaseService().release(current.session.sdkSessionId, nativeLeaseOwner(channelType, chatId));
   }
 
-  private async handleClaudeSessions(adapter: BaseChannelAdapter, msg: InboundMessage, parts: string[]): Promise<boolean> {
+  private async handleNativeSessions(adapter: BaseChannelAdapter, msg: InboundMessage, parts: string[]): Promise<boolean> {
     const { store } = getBridgeContext();
     const leaseService = this.getLeaseService();
     const cache = this.getCandidateCache();
     const owner = nativeLeaseOwner(msg.channelType, msg.chatId);
     const chatKey = this.chatKey(msg.channelType, msg.chatId);
+    const source = this.sourceForRuntime(this.getRuntime(msg.channelType, msg.chatId));
+    const label = this.labelForSource(source);
 
     await leaseService.cleanupExpired();
-    const scan = this.nativeDeps?.scanNativeSessions ?? scanClaudeNativeSessions;
+    const scan = source === 'codex-native'
+      ? (this.nativeDeps?.scanCodexNativeSessions ?? scanCodexNativeSessions)
+      : (this.nativeDeps?.scanNativeSessions ?? scanClaudeNativeSessions);
     const scanned = await scan();
     const showAll = parts[1]?.toLowerCase() === 'all';
     const displayed = showAll ? scanned : scanned.slice(0, 5);
-    cache.set(chatKey, displayed);
+    cache.set(chatKey, displayed, Date.now(), source);
 
     if (displayed.length === 0) {
-      await adapter.send({ chatId: msg.chatId, text: 'No Claude Code history sessions found.' });
+      await adapter.send({ chatId: msg.chatId, text: `No ${label} history sessions found.` });
       return true;
     }
 
     const importedSessionsBySdkId = new Map(
       (await store.listSessions())
-        .filter(session => session.source === 'claude-native' && session.sdkSessionId)
+        .filter(session => session.source === source && session.sdkSessionId)
         .map(session => [session.sdkSessionId as string, session]),
     );
 
@@ -725,7 +771,7 @@ export class CommandRouter {
     }
 
     const html = [
-      '<b>📋 Claude Code history sessions</b>',
+      `<b>📋 ${label} history sessions</b>`,
       '',
       lines.join('\n\n'),
       '',
@@ -770,7 +816,7 @@ export class CommandRouter {
     return candidate.cwd || 'cwd unavailable';
   }
 
-  private async handleResumeClaude(
+  private async handleResumeNative(
     adapter: BaseChannelAdapter,
     msg: InboundMessage,
     parts: string[],
@@ -795,46 +841,52 @@ export class CommandRouter {
     const owner = nativeLeaseOwner(msg.channelType, msg.chatId);
     const chatKey = this.chatKey(msg.channelType, msg.chatId);
     const currentImported = await this.getCurrentImportedBinding(msg.channelType, msg.chatId);
+    let source = this.sourceForRuntime(this.getRuntime(msg.channelType, msg.chatId));
 
     let candidate: ClaudeNativeSessionCandidate | null = null;
 
     if (parsed.target.toLowerCase() === 'current') {
       candidate = await this.resolveCurrentCandidate(msg.channelType, msg.chatId);
       if (!candidate) {
-        await adapter.send({ chatId: msg.chatId, text: '⚠️ This chat is not currently bound to an imported Claude native session.' });
+        await adapter.send({ chatId: msg.chatId, text: '⚠️ This chat is not currently bound to an imported native session.' });
         return true;
       }
+      source = currentImported?.session.source ?? source;
     } else {
       if (/^\d+$/.test(parsed.target)) {
         const idx = Number(parsed.target);
         const cached = cache.get(chatKey);
+        const cachedSource = cache.getSource(chatKey);
         if (!cached || idx < 1 || idx > cached.length) {
           await adapter.send({
             chatId: msg.chatId,
-            text: '⚠️ Cached Claude native session list is missing, expired, or invalid. Run /session first.',
+            text: '⚠️ Cached native session list is missing, expired, or invalid. Run /session first.',
           });
           return true;
         }
+        source = cachedSource ?? source;
         candidate = cached[idx - 1];
       } else {
-        const finder = this.nativeDeps?.findNativeSessionById ?? findClaudeNativeSessionById;
+        const finder = source === 'codex-native'
+          ? (this.nativeDeps?.findCodexNativeSessionById ?? findCodexNativeSessionById)
+          : (this.nativeDeps?.findNativeSessionById ?? findClaudeNativeSessionById);
         candidate = await finder(parsed.target);
         if (!candidate) {
           await adapter.send({
             chatId: msg.chatId,
-            text: `⚠️ Claude native session ${parsed.target} was not found. Run /session or check the session id.`,
+            text: `⚠️ ${this.labelForSource(source)} native session ${parsed.target} was not found. Run /session or check the session id.`,
           });
           return true;
         }
       }
     }
 
-    const existingImported = await this.findImportedSession(candidate.sessionId);
+    const existingImported = await this.findImportedSession(candidate.sessionId, source);
     const activeLease = await leaseService.getActive(candidate.sessionId);
     if (activeLease && activeLease.owner !== owner) {
       await adapter.send({
         chatId: msg.chatId,
-        text: `⚠️ This Claude native session is locked ${maskLeaseOwner(activeLease.owner)}.`,
+        text: `⚠️ This ${this.labelForSource(source)} native session is locked ${maskLeaseOwner(activeLease.owner)}.`,
       });
       return true;
     }
@@ -845,7 +897,7 @@ export class CommandRouter {
       return true;
     }
 
-    const importedSession = await importClaudeNativeSession(store, candidate, {
+    const importedSession = await importNativeSession(store, candidate, source, {
       cwdOverride: cwdValidation.cwd,
     });
     const acquired = await leaseService.acquire({
@@ -858,7 +910,7 @@ export class CommandRouter {
     if (acquired.status === 'blocked') {
       await adapter.send({
         chatId: msg.chatId,
-        text: `⚠️ This Claude native session is locked ${maskLeaseOwner(acquired.lease.owner)}.`,
+        text: `⚠️ This ${this.labelForSource(source)} native session is locked ${maskLeaseOwner(acquired.lease.owner)}.`,
       });
       return true;
     }
@@ -876,10 +928,11 @@ export class CommandRouter {
     this.state.clearLastActive(msg.channelType, msg.chatId);
     this.state.clearThread(msg.channelType, msg.chatId);
 
-    const runtimeBefore = this.state.getRuntime(msg.channelType, msg.chatId) || 'claude';
-    const switchedToClaude = runtimeBefore !== 'claude';
-    if (switchedToClaude) {
-      this.state.setRuntime(msg.channelType, msg.chatId, 'claude');
+    const runtimeBefore = this.getRuntime(msg.channelType, msg.chatId);
+    const targetRuntime = this.runtimeForSource(source);
+    const switchedRuntime = runtimeBefore !== targetRuntime;
+    if (switchedRuntime) {
+      this.state.setRuntime(msg.channelType, msg.chatId, targetRuntime);
     }
 
     cache.clear(chatKey);
@@ -887,12 +940,14 @@ export class CommandRouter {
     const html = this.buildResumeSuccessHtml({
       candidate,
       tliveSessionId: importedSession.id,
+      source,
       cwd: cwdValidation.cwd,
-      switchedToClaude,
-      isolatedSettings: llm instanceof ClaudeSDKProvider && llm.getSettingSources().length === 0,
+      switchedRuntime,
+      targetRuntime,
+      isolatedSettings: source === 'claude-native' && llm instanceof ClaudeSDKProvider && llm.getSettingSources().length === 0,
       permissionsOff: this.state.getPermMode(msg.channelType, msg.chatId) === 'off',
       model: this.state.getModel(msg.channelType, msg.chatId),
-      effort: this.state.getEffort(msg.channelType, msg.chatId) ?? 'xhigh',
+      effort: this.state.getEffort(msg.channelType, msg.chatId) ?? (source === 'claude-native' ? 'xhigh' : 'default'),
     });
     await adapter.send({ chatId: msg.chatId, html });
 
@@ -953,10 +1008,10 @@ export class CommandRouter {
 
     const usage = `/resume ${target} cwd "absolute path"`;
     if (!candidate.cwd || candidate.cwdSource === 'unknown') {
-      return { ok: false, error: `⚠️ Claude session cwd is unavailable. Use ${usage}.` };
+      return { ok: false, error: `⚠️ Native session cwd is unavailable. Use ${usage}.` };
     }
 
-    return { ok: false, error: `⚠️ Claude session cwd path is missing: ${candidate.cwd}. Use ${usage}.` };
+    return { ok: false, error: `⚠️ Native session cwd path is missing: ${candidate.cwd}. Use ${usage}.` };
   }
 
   private validateDirectoryOverride(cwdOverride: string): { ok: true; cwd: string } | { ok: false; error: string } {
@@ -985,7 +1040,10 @@ export class CommandRouter {
       return null;
     }
 
-    const finder = this.nativeDeps?.findNativeSessionById ?? findClaudeNativeSessionById;
+    const source = current.session.source;
+    const finder = source === 'codex-native'
+      ? (this.nativeDeps?.findCodexNativeSessionById ?? findCodexNativeSessionById)
+      : (this.nativeDeps?.findNativeSessionById ?? findClaudeNativeSessionById);
     const refreshed = await finder(current.session.sdkSessionId);
     if (refreshed) {
       return refreshed;
@@ -1008,18 +1066,21 @@ export class CommandRouter {
   private buildResumeSuccessHtml(params: {
     candidate: ClaudeNativeSessionCandidate;
     tliveSessionId: string;
+    source: NativeSessionSource;
     cwd: string;
-    switchedToClaude: boolean;
+    switchedRuntime: boolean;
+    targetRuntime: RuntimeName;
     isolatedSettings: boolean;
     permissionsOff: boolean;
     model?: string;
     effort: string;
   }): string {
+    const label = this.resumeTitleForSource(params.source);
     const lines = [
-      '🔄 <b>Claude session resumed</b>',
+      `🔄 <b>${label} session resumed</b>`,
       '',
       `📁 <code>${this.escapeHtml(params.cwd)}</code>`,
-      `💻 <code>claude --resume ${this.escapeHtml(params.candidate.sessionId)}</code>`,
+      `💻 <code>${this.escapeHtml(this.resumeCommandForSource(params.source, params.candidate.sessionId))}</code>`,
     ];
 
     if (params.candidate.gitBranch) {
@@ -1031,8 +1092,8 @@ export class CommandRouter {
     lines.push(`🧠 Effort: ${this.escapeHtml(params.effort)}`);
     lines.push(`🔐 Perm: ${params.permissionsOff ? 'off' : 'on'}`);
 
-    if (params.switchedToClaude) {
-      lines.push('Runtime: switched to Claude');
+    if (params.switchedRuntime) {
+      lines.push(`Runtime: switched to ${params.targetRuntime === 'codex' ? 'Codex' : 'Claude'}`);
     }
 
     if (params.isolatedSettings) {
@@ -1061,17 +1122,19 @@ export class CommandRouter {
     if (!current?.session.sdkSessionId) {
       await adapter.send({
         chatId: msg.chatId,
-        text: '⚠️ This chat is not currently bound to an imported Claude native session.',
+        text: '⚠️ This chat is not currently bound to an imported native session.',
       });
       return true;
     }
 
+    const source = current.session.source;
+    const label = this.labelForSource(source);
     const owner = nativeLeaseOwner(msg.channelType, msg.chatId);
     const result = await this.getLeaseService().release(current.session.sdkSessionId, owner);
     if (result.status === 'blocked') {
       await adapter.send({
         chatId: msg.chatId,
-        text: `⚠️ This Claude native session is locked ${maskLeaseOwner(result.lease.owner)}.`,
+        text: `⚠️ This ${label} native session is locked ${maskLeaseOwner(result.lease.owner)}.`,
       });
       return true;
     }
@@ -1080,15 +1143,15 @@ export class CommandRouter {
     this.getCandidateCache().clear(this.chatKey(msg.channelType, msg.chatId));
 
     const statusLine = result.status === 'released'
-      ? '✅ Released Claude native lease and closed the local live session.'
+      ? `✅ Released ${label} native lease and closed the local live session.`
       : result.status === 'expired'
-        ? 'ℹ️ Claude native lease had already expired; local live session cleanup still ran.'
-        : 'ℹ️ Claude native lease was already released or missing; local live session cleanup still ran.';
+        ? `ℹ️ ${label} native lease had already expired; local live session cleanup still ran.`
+        : `ℹ️ ${label} native lease was already released or missing; local live session cleanup still ran.`;
     const html = [
       `<b>${statusLine}</b>`,
       '',
       `<b>CWD:</b> <code>${this.escapeHtml(current.session.workingDirectory)}</code>`,
-      `<b>Resume on desktop:</b> <code>claude --resume ${this.escapeHtml(current.session.sdkSessionId)}</code>`,
+      `<b>Resume on desktop:</b> <code>${this.escapeHtml(this.resumeCommandForSource(source, current.session.sdkSessionId))}</code>`,
       'Desktop reminder: do not keep concurrent typing active after handing control back.',
     ].join('\n');
     await adapter.send({ chatId: msg.chatId, html });

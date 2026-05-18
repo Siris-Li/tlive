@@ -206,8 +206,11 @@ const TEMP_DIRS: string[] = [];
 
 function createHarness(options: {
   channelType?: string;
+  defaultRuntime?: 'claude' | 'codex';
   scanNativeSessions?: () => Promise<ClaudeNativeSessionCandidate[]>;
   findNativeSessionById?: (sessionId: string) => Promise<ClaudeNativeSessionCandidate | null>;
+  scanCodexNativeSessions?: () => Promise<ClaudeNativeSessionCandidate[]>;
+  findCodexNativeSessionById?: (sessionId: string) => Promise<ClaudeNativeSessionCandidate | null>;
   isChatActive?: (channelType: string, chatId: string) => boolean;
   onNewSession?: (channelType: string, chatId: string) => void;
   activeControls?: Map<string, { interrupt(): Promise<void> }>;
@@ -250,9 +253,12 @@ function createHarness(options: {
       isChatActive: options.isChatActive,
       scanNativeSessions: options.scanNativeSessions,
       findNativeSessionById: options.findNativeSessionById,
+      scanCodexNativeSessions: options.scanCodexNativeSessions,
+      findCodexNativeSessionById: options.findCodexNativeSessionById,
       leaseService,
       candidateCache,
     },
+    options.defaultRuntime,
   );
 
   return {
@@ -427,6 +433,56 @@ describe('CommandRouter native Claude commands', () => {
     expect(harness.candidateCache.get(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID))).toEqual(candidates);
   });
 
+  it('lists Codex native sessions when the Telegram chat runtime is codex', async () => {
+    const claudeCandidate = makeCandidate('claude-hidden', {
+      nativePreview: 'claude preview should not show',
+    });
+    const codexCandidate = makeCandidate('codex-visible', {
+      sourcePath: 'C:\\Users\\SirisLi\\.codex\\sessions\\codex-visible.jsonl',
+      cwd: 'C:\\codex-repo',
+      nativePreview: 'codex preview should show',
+      gitBranch: undefined,
+    });
+    const harness = createHarness({
+      scanNativeSessions: async () => [claudeCandidate],
+      scanCodexNativeSessions: async () => [codexCandidate],
+    });
+    harness.state.setRuntime(CHANNEL_TYPE, CHAT_ID, 'codex');
+
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
+
+    const html = String(lastSend(harness.adapter)?.html ?? '');
+    expect(html).toContain('Codex history sessions');
+    expect(html).toContain('codex preview should show');
+    expect(html).not.toContain('claude preview should not show');
+    expect(html).toContain('/resume &lt;n&gt;');
+    expect(harness.candidateCache.get(harness.state.stateKey(CHANNEL_TYPE, CHAT_ID))).toEqual([codexCandidate]);
+  });
+
+  it('lists Codex native sessions when the bridge default runtime is codex', async () => {
+    const claudeCandidate = makeCandidate('claude-default-hidden', {
+      nativePreview: 'default claude preview should not show',
+    });
+    const codexCandidate = makeCandidate('codex-default-visible', {
+      sourcePath: 'C:\\Users\\SirisLi\\.codex\\sessions\\codex-default-visible.jsonl',
+      cwd: 'C:\\codex-default-repo',
+      nativePreview: 'default codex preview should show',
+      gitBranch: undefined,
+    });
+    const harness = createHarness({
+      defaultRuntime: 'codex',
+      scanNativeSessions: async () => [claudeCandidate],
+      scanCodexNativeSessions: async () => [codexCandidate],
+    });
+
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
+
+    const html = String(lastSend(harness.adapter)?.html ?? '');
+    expect(html).toContain('Codex history sessions');
+    expect(html).toContain('default codex preview should show');
+    expect(html).not.toContain('default claude preview should not show');
+  });
+
   it('rejects native Claude commands outside Telegram', async () => {
     const harness = createHarness({ channelType: 'discord' });
 
@@ -483,10 +539,10 @@ describe('CommandRouter native Claude commands', () => {
     });
     await bindCurrentImportedSession(harness.store, current);
     await saveLease(harness.store, 'native-a', current.id);
-    harness.state.setRuntime(CHANNEL_TYPE, CHAT_ID, 'codex');
     harness.state.setPermMode(CHANNEL_TYPE, CHAT_ID, 'off');
 
     await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
+    harness.state.setRuntime(CHANNEL_TYPE, CHAT_ID, 'codex');
     vi.mocked(harness.adapter.send).mockClear();
 
     const handled = await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1'));
@@ -515,6 +571,49 @@ describe('CommandRouter native Claude commands', () => {
     expect(successHtml).toContain('🧠 Effort: xhigh');
     expect(successHtml).toContain('🔐 Perm: off');
     expect(successHtml).toContain('Runtime: switched to Claude');
+    expect(String(vi.mocked(harness.adapter.send).mock.calls[1]?.[0]?.html ?? '')).toContain('Recent context');
+  });
+
+  it('resumes a numeric cached Codex native session and keeps runtime set to codex', async () => {
+    const cwd = createTempDir('codex-resume-target');
+    const candidate = makeCandidate('codex-native-b', {
+      sourcePath: 'C:\\Users\\SirisLi\\.codex\\sessions\\codex-native-b.jsonl',
+      cwd,
+      cwdExists: true,
+      gitBranch: undefined,
+      recentMessages: [
+        { role: 'user', text: 'Continue Codex from Telegram' },
+        { role: 'assistant', text: 'I will continue the Codex thread.' },
+      ],
+    });
+    const harness = createHarness({
+      scanCodexNativeSessions: async () => [candidate],
+    });
+    harness.state.setRuntime(CHANNEL_TYPE, CHAT_ID, 'codex');
+    harness.state.setEffort(CHANNEL_TYPE, CHAT_ID, 'high');
+
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/session'));
+    vi.mocked(harness.adapter.send).mockClear();
+
+    const handled = await harness.commandRouter.handle(harness.adapter, makeMessage('/resume 1'));
+
+    expect(handled).toBe(true);
+    const resumed = (await harness.store.listSessions()).find(session => session.sdkSessionId === 'codex-native-b');
+    expect(resumed).toEqual(expect.objectContaining({
+      source: 'codex-native',
+      workingDirectory: cwd,
+    }));
+    expect((await harness.store.getBinding(CHANNEL_TYPE, CHAT_ID))?.sessionId).toBe(resumed?.id);
+    expect(await harness.leaseService.getActive('codex-native-b')).toEqual(
+      expect.objectContaining({ owner: nativeLeaseOwner(CHANNEL_TYPE, CHAT_ID) }),
+    );
+    expect(harness.state.getRuntime(CHANNEL_TYPE, CHAT_ID)).toBe('codex');
+    const successHtml = String(vi.mocked(harness.adapter.send).mock.calls[0]?.[0]?.html ?? '');
+    expect(successHtml).toContain('Codex session resumed');
+    expect(successHtml).toContain('codex resume codex-native-b');
+    expect(successHtml).not.toContain('claude --resume');
+    expect(successHtml).toContain('Effort: high');
+    expect(successHtml).not.toContain('Runtime: switched to Claude');
     expect(String(vi.mocked(harness.adapter.send).mock.calls[1]?.[0]?.html ?? '')).toContain('Recent context');
   });
 
@@ -765,6 +864,29 @@ describe('CommandRouter native Claude commands', () => {
     expect(String(lastSend(harness.adapter)?.text ?? '')).toContain('Usage: /resume <n|current>');
   });
 
+  it('marks Claude and Codex native imports in the non-Telegram /sessions list', async () => {
+    const harness = createHarness({ channelType: 'discord' });
+    await harness.store.saveSession(makeRegularSession({
+      id: 'session-codex-imported',
+      sdkSessionId: 'codex-sdk',
+      source: 'codex-native',
+      nativePreview: 'codex native preview',
+      createdAt: '2026-05-06T12:30:00.000Z',
+    }));
+    await harness.store.saveSession(makeImportedSession({
+      id: 'session-claude-imported',
+      sdkSessionId: 'claude-sdk',
+      nativePreview: 'claude native preview',
+      createdAt: '2026-05-06T12:00:00.000Z',
+    }));
+
+    await harness.commandRouter.handle(harness.adapter, makeMessage('/sessions', 'discord'));
+
+    const description = String(lastSend(harness.adapter)?.embed?.description ?? '');
+    expect(description).toContain('[Codex native] codex native preview');
+    expect(description).toContain('[Claude native] claude native preview');
+  });
+
   it('refreshes but does not release the current native lease on /stop', async () => {
     const current = makeImportedSession({ id: 'session-imported-stop', sdkSessionId: 'native-stop' });
     const harness = createHarness();
@@ -804,15 +926,20 @@ describe('CommandRouter native Claude commands', () => {
     }
   });
 
-  it('includes only /session, /resume, and /release native Claude commands in Telegram /help', async () => {
+  it('includes only /session, /resume, and /release native session commands in Telegram /help', async () => {
     const harness = createHarness();
 
     await harness.commandRouter.handle(harness.adapter, makeMessage('/help'));
 
     const html = String(lastSend(harness.adapter)?.html ?? '');
     expect(html).toContain('/session');
+    expect(html).toContain('Native session list for current runtime');
     expect(html).toContain('/resume &lt;n|current&gt;');
+    expect(html).toContain('Resume native session');
     expect(html).toContain('/release');
+    expect(html).toContain('Release native session lease');
+    expect(html).not.toContain('Claude native session');
+    expect(html).not.toContain('Release Claude native');
     expect(html).not.toContain('/sessions');
     expect(html).not.toContain('/claude-sessions');
     expect(html).not.toContain('/claude_sessions');

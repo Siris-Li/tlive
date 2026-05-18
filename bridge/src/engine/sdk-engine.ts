@@ -364,7 +364,11 @@ export class SDKEngine {
   }
 
   private isNativeImportedSession(session: SessionData | null | undefined): session is SessionData & { sdkSessionId: string } {
-    return session?.source === 'claude-native' && !!session.sdkSessionId;
+    return (session?.source === 'claude-native' || session?.source === 'codex-native') && !!session.sdkSessionId;
+  }
+
+  private nativeSessionLabel(session: SessionData): string {
+    return session.source === 'codex-native' ? 'Codex' : 'Claude';
   }
 
   private async guardNativeImportedSession(
@@ -387,14 +391,14 @@ export class SDKEngine {
     if (refresh.status === 'blocked') {
       await adapter.send({
         chatId: msg.chatId,
-        text: `This native Claude session is currently owned by ${maskLeaseOwner(refresh.lease.owner)}. Use /session to choose another session.`,
+        text: `This native ${this.nativeSessionLabel(session)} session is currently owned by ${maskLeaseOwner(refresh.lease.owner)}. Use /session to choose another session.`,
       });
       return false;
     }
 
     await adapter.send({
       chatId: msg.chatId,
-      text: 'This native Claude session has been released or expired. Run /resume current to take it over again, or /new to start fresh.',
+      text: `This native ${this.nativeSessionLabel(session)} session has been released or expired. Run /resume current to take it over again, or /new to start fresh.`,
     });
     return false;
   }

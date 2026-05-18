@@ -16,6 +16,7 @@ const TLIVE_HOME = join(homedir(), '.tlive');
 const RUNTIME_DIR = join(TLIVE_HOME, 'runtime');
 const LOG_DIR = join(TLIVE_HOME, 'logs');
 const BRIDGE_PID = join(RUNTIME_DIR, 'bridge.pid');
+const STATUS_FILE = join(RUNTIME_DIR, 'status.json');
 const BRIDGE_ENTRY = join(PACKAGE_ROOT, 'bridge', 'dist', 'main.mjs');
 const CONFIG_FILE = join(TLIVE_HOME, 'config.env');
 const CORE_BIN = join(TLIVE_HOME, 'bin', isWindows ? 'tlive-core.exe' : 'tlive-core');
@@ -69,6 +70,15 @@ function getBridgePid() {
     if (isNaN(pid)) return null;
     return isProcessRunning(pid) ? pid : null;
   } catch { return null; }
+}
+
+function getBridgeStatus() {
+  if (!existsSync(STATUS_FILE)) return {};
+  try {
+    return JSON.parse(readFileSync(STATUS_FILE, 'utf-8'));
+  } catch {
+    return {};
+  }
 }
 
 /** Ensure runtime and log directories exist */
@@ -143,13 +153,15 @@ async function daemonStatus() {
   console.log('=== TLive Status ===');
 
   const config = loadConfigEnv();
-  const runtime = process.env.TL_RUNTIME || config.TL_RUNTIME || 'claude';
   const pid = getBridgePid();
 
   if (pid) {
+    const status = getBridgeStatus();
+    const runtime = status.runtime || process.env.TL_RUNTIME || config.TL_RUNTIME || 'claude';
     console.log(`Bridge:       running (PID ${pid}, runtime: ${runtime})`);
   } else {
-    console.log('Bridge:       not running');
+    const runtime = process.env.TL_RUNTIME || config.TL_RUNTIME || 'claude';
+    console.log(`Bridge:       not running (configured runtime: ${runtime})`);
   }
 
   // Check Go Core web terminal

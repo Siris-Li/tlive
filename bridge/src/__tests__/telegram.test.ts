@@ -225,15 +225,15 @@ describe('TelegramAdapter', () => {
   });
 
   describe('start()', () => {
-    it('registers /session and /resume native Claude commands in the Telegram menu', async () => {
+    it('registers /session and /resume native session commands in the Telegram menu', async () => {
       await adapter.start();
       expect(mockGetMe).toHaveBeenCalled();
       expect(mockSetMyCommands).toHaveBeenCalled();
       const commands = mockSetMyCommands.mock.calls.at(-1)?.[0] ?? [];
       expect(commands).toEqual(expect.arrayContaining([
-        { command: 'session', description: 'List native Claude sessions' },
-        { command: 'resume', description: 'Resume native Claude session' },
-        { command: 'release', description: 'Release native Claude takeover' },
+        { command: 'session', description: 'List current runtime native sessions' },
+        { command: 'resume', description: 'Resume current runtime native session' },
+        { command: 'release', description: 'Release native session takeover' },
       ]));
       const commandNames = commands.map((entry: { command: string }) => entry.command);
       expect(commandNames).not.toContain('sessions');

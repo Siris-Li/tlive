@@ -1,7 +1,7 @@
 export interface SessionData {
   id: string;
   sdkSessionId?: string;
-  source?: 'claude-native';
+  source?: 'claude-native' | 'codex-native';
   sourcePath?: string;
   importedAt?: string;
   lastNativeActivityAt?: string;

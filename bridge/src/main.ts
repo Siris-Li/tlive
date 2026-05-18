@@ -145,6 +145,7 @@ async function main() {
     pid: process.pid,
     startedAt: new Date().toISOString(),
     channels: config.enabledChannels,
+    runtime: config.runtime,
     version: '0.1.0',
   });
 

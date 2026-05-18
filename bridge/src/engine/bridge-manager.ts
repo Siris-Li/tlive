@@ -18,6 +18,8 @@ import { ControlPanel } from './control-panel.js';
 export type { HookNotificationData } from './hook-engine.js';
 import { networkInterfaces } from 'node:os';
 
+type RuntimeName = 'claude' | 'codex';
+
 /** Bridge commands handled synchronously (don't block adapter loop) */
 const QUICK_COMMANDS = new Set(['/menu', '/new', '/status', '/verbose', '/hooks', '/sessions', '/session', '/help', '/perm', '/effort', '/stop', '/approve', '/pairings', '/runtime', '/settings', '/model', '/claude-sessions', '/claude_sessions', '/cs', '/resume', '/resume-claude', '/resume_claude', '/rc', '/release']);
 
@@ -60,6 +62,7 @@ export class BridgeManager {
   private sdkEngine: SDKEngine;
   private hookEngine: HookEngine;
   private messageRouter: MessageRouter;
+  private defaultRuntime: RuntimeName;
   /** Cached LLM providers keyed by runtime name */
   private providerCache = new Map<string, LLMProvider>();
 
@@ -70,6 +73,7 @@ export class BridgeManager {
     const broker = new PermissionBroker(gateway, effectivePublicUrl);
     this.coreUrl = config.coreUrl;
     this.token = config.token;
+    this.defaultRuntime = config.runtime === 'codex' ? 'codex' : 'claude';
     this.permissions = new PermissionCoordinator(gateway, broker, this.coreUrl, this.token);
     this.sdkEngine = new SDKEngine(this.state, this.router, this.permissions);
     this.hookEngine = new HookEngine(this.permissions, () => this.coreAvailable, this.token, getLocalIP);
@@ -90,6 +94,7 @@ export class BridgeManager {
         isChatActive: (channelType, chatId) =>
           (this.sdkEngine as unknown as { isChatActive?: (channelType: string, chatId: string) => boolean }).isChatActive?.(channelType, chatId) ?? false,
       },
+      this.defaultRuntime,
     );
     this.callbackRouter = new CallbackRouter(
       this.permissions,
@@ -105,6 +110,7 @@ export class BridgeManager {
       this.sdkEngine.getActiveControls(),
       this.router,
       (channelType, chatId) => this.sdkEngine.closeSession(channelType, chatId),
+      this.defaultRuntime,
     );
     this.commands.setControlPanel(controlPanel);
     this.callbackRouter.setControlPanel(controlPanel);
@@ -127,8 +133,8 @@ export class BridgeManager {
 
   /** Resolve LLM provider for a chat — uses per-chat runtime if set, else global default */
   private getProvider(channelType: string, chatId: string): LLMProvider {
-    const runtime = this.state.getRuntime(channelType, chatId);
-    if (!runtime) return getBridgeContext().llm;
+    const runtime = this.state.getRuntime(channelType, chatId) ?? this.defaultRuntime;
+    if (runtime === this.defaultRuntime) return getBridgeContext().llm;
 
     if (!this.providerCache.has(runtime)) {
       const config = loadConfig();

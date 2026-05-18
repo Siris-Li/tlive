@@ -90,9 +90,9 @@ export class TelegramAdapter extends BaseChannelAdapter {
       await this.bot.api.setMyCommands([
         { command: 'menu', description: '⚙️ Control Panel' },
         { command: 'new', description: 'New conversation' },
-        { command: 'session', description: 'List native Claude sessions' },
-        { command: 'resume', description: 'Resume native Claude session' },
-        { command: 'release', description: 'Release native Claude takeover' },
+        { command: 'session', description: 'List current runtime native sessions' },
+        { command: 'resume', description: 'Resume current runtime native session' },
+        { command: 'release', description: 'Release native session takeover' },
         { command: 'model', description: 'Switch model' },
         { command: 'runtime', description: 'Switch provider (claude/codex)' },
         { command: 'settings', description: 'Settings scope (user/full/isolated)' },

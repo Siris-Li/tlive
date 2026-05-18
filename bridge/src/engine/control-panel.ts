@@ -6,6 +6,8 @@ import type { OutboundMessage, Button } from '../channels/types.js';
 import type { QueryControls } from '../providers/base.js';
 import { getBridgeContext } from '../context.js';
 
+type RuntimeName = 'claude' | 'codex';
+
 /**
  * Button-based control panel for managing TLive sessions.
  * Renders a single card that is edited in-place for sub-menus.
@@ -17,7 +19,12 @@ export class ControlPanel {
     private activeControls: Map<string, QueryControls>,
     private router: ChannelRouter,
     private onNewSession?: (channelType: string, chatId: string) => void,
+    private defaultRuntime: RuntimeName = 'claude',
   ) {}
+
+  private getRuntime(channelType: string, chatId: string): RuntimeName {
+    return this.state.getRuntime(channelType, chatId) || this.defaultRuntime;
+  }
 
   /** Render the main panel card */
   async show(adapter: BaseChannelAdapter, chatId: string): Promise<void> {
@@ -120,7 +127,7 @@ export class ControlPanel {
     const model = this.state.getModel(channelType, chatId) || 'default';
     const effort = this.state.getEffort(channelType, chatId) || 'default';
     const perm = this.state.getPermMode(channelType, chatId);
-    const runtime = this.state.getRuntime(channelType, chatId) || 'claude';
+    const runtime = this.getRuntime(channelType, chatId);
     const chatKey = `${channelType}:${chatId}`;
 
     const effortIcons: Record<string, string> = { low: '⚡', medium: '🧠', high: '💪', max: '🔥', default: '⚡' };
@@ -178,7 +185,7 @@ export class ControlPanel {
 
   buildModelPicker(channelType: string, chatId: string): OutboundMessage {
     const current = this.state.getModel(channelType, chatId) || 'default';
-    const runtime = this.state.getRuntime(channelType, chatId) || 'claude';
+    const runtime = this.getRuntime(channelType, chatId);
     const chatKey = `${channelType}:${chatId}`;
 
     const models = runtime === 'codex'
