@@ -9,6 +9,10 @@ description: |
   Trigger phrases: "tlive", "IM bridge", "消息桥接", "手机交互", "启动桥接",
   "连接飞书", "连接Telegram", "诊断", "查看日志", "配置".
   Do NOT use for: building bots, webhook integrations, or general coding tasks.
+metadata:
+  source: https://github.com/Siris-Li/tlive.git
+  source_path: SKILL.md
+  upstream: https://github.com/y49/tlive.git
 argument-hint: "setup | stop | status | logs [N] | reconfigure | doctor"
 allowed-tools:
   - Bash
