@@ -11,8 +11,10 @@ export interface PermissionCardData {
 
 /** Hook notification input data */
 export interface NotificationData {
-  type: 'stop' | 'idle_prompt' | 'generic';
+  type: 'stop' | 'idle_prompt' | 'generic' | 'external';
   title: string;
+  source?: string;
+  severity?: string;
   summary?: string;
   terminalUrl?: string;
 }

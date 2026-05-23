@@ -116,4 +116,43 @@ describe('formatNotification', () => {
     );
     expect(msg.html!.length).toBeLessThan(4000);
   });
+
+  it('external: telegram includes title, source, severity, and multiline summary without terminal link', () => {
+    const msg = formatNotification(
+      {
+        type: 'external',
+        title: 'GitHub fork updates',
+        source: 'fork-watch',
+        severity: 'info',
+        summary: 'claude-paper upstream +2, local +0\nppt-master upstream +5, local +3',
+      },
+      'telegram'
+    );
+
+    expect(msg.html).toContain('GitHub fork updates');
+    expect(msg.html).toContain('Source:');
+    expect(msg.html).toContain('fork-watch');
+    expect(msg.html).toContain('Severity:');
+    expect(msg.html).toContain('info');
+    expect(msg.html).toContain('claude-paper upstream +2, local +0');
+    expect(msg.html).toContain('ppt-master upstream +5, local +3');
+    expect(msg.html).not.toContain('Open Terminal');
+    expect((msg as any).buttons).toBeUndefined();
+  });
+
+  it('external: telegram escapes HTML in source and summary', () => {
+    const msg = formatNotification(
+      {
+        type: 'external',
+        title: 'Build <alert>',
+        source: 'fork-watch <prod>',
+        summary: 'repo <main> & upstream',
+      },
+      'telegram'
+    );
+
+    expect(msg.html).toContain('Build &lt;alert&gt;');
+    expect(msg.html).toContain('fork-watch &lt;prod&gt;');
+    expect(msg.html).toContain('repo &lt;main&gt; &amp; upstream');
+  });
 });

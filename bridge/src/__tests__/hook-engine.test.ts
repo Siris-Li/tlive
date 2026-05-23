@@ -193,6 +193,96 @@ describe('HookEngine', () => {
     });
   });
 
+  describe('external notification', () => {
+    it('formats and forwards external notifications with source and summary', async () => {
+      engine = createEngine();
+
+      await engine.sendNotification(adapter, 'c1', {
+        tlive_hook_type: 'external',
+        source: 'fork-watch',
+        title: 'GitHub fork updates',
+        summary: 'claude-paper upstream +2, local +0\nppt-master upstream +5, local +3',
+        severity: 'info',
+      });
+
+      expect(formatNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'external',
+          title: 'GitHub fork updates',
+          source: 'fork-watch',
+          severity: 'info',
+          summary: 'claude-paper upstream +2, local +0\nppt-master upstream +5, local +3',
+          terminalUrl: undefined,
+        }),
+        'telegram',
+      );
+      expect(adapter.send).toHaveBeenCalledWith(
+        expect.objectContaining({
+          chatId: 'c1',
+        }),
+      );
+    });
+
+    it('does not generate terminalUrl for external notifications even when a session ID is present', async () => {
+      engine = createEngine({ coreAvailable: true, token: 'my-token', localIP: '192.168.1.10' });
+
+      await engine.sendNotification(adapter, 'c1', {
+        tlive_hook_type: 'external',
+        tlive_session_id: 'sess-001',
+        source: 'fork-watch',
+        title: 'GitHub fork updates',
+      });
+
+      expect(formatNotification).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: 'external',
+          terminalUrl: undefined,
+        }),
+        'telegram',
+      );
+    });
+
+    it('falls back to message and then Notification when title is missing', async () => {
+      engine = createEngine();
+
+      await engine.sendNotification(adapter, 'c1', {
+        tlive_hook_type: 'external',
+        message: 'Plain external message',
+      });
+      await engine.sendNotification(adapter, 'c1', {
+        tlive_hook_type: 'external',
+      });
+
+      expect(formatNotification).toHaveBeenNthCalledWith(
+        1,
+        expect.objectContaining({
+          type: 'external',
+          title: 'Plain external message',
+        }),
+        'telegram',
+      );
+      expect(formatNotification).toHaveBeenNthCalledWith(
+        2,
+        expect.objectContaining({
+          type: 'external',
+          title: 'Notification',
+        }),
+        'telegram',
+      );
+    });
+
+    it('does not track external messages for session reply routing', async () => {
+      engine = createEngine();
+
+      await engine.sendNotification(adapter, 'c1', {
+        tlive_hook_type: 'external',
+        title: 'GitHub fork updates',
+      });
+
+      expect(permissions.trackHookMessage).not.toHaveBeenCalled();
+    });
+  });
+
   describe('context suffix', () => {
     it('includes project name from cwd and short session ID', async () => {
       engine = createEngine();

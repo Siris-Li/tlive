@@ -10,6 +10,10 @@ export interface HookNotificationData {
   tlive_session_id?: string;
   tlive_cwd?: string;
   notification_type?: string;
+  source?: string;
+  title?: string;
+  summary?: string;
+  severity?: string;
   message?: string;
   last_assistant_message?: string;
   last_output?: string;
@@ -36,8 +40,10 @@ export class HookEngine {
     const hookType = hook.tlive_hook_type || '';
 
     let title: string;
-    let type: 'stop' | 'idle_prompt' | 'generic';
+    let type: 'stop' | 'idle_prompt' | 'generic' | 'external';
     let summary: string | undefined;
+    let source: string | undefined;
+    let severity: string | undefined;
 
     // Build context suffix: project name + short session ID
     const contextParts: string[] = [];
@@ -51,7 +57,13 @@ export class HookEngine {
     }
     const contextSuffix = contextParts.length > 0 ? ' · ' + contextParts.join(' · ') : '';
 
-    if (hookType === 'stop') {
+    if (hookType === 'external') {
+      type = 'external';
+      title = asString(hook.title) || asString(hook.message) || 'Notification';
+      summary = asString(hook.summary) || undefined;
+      source = asString(hook.source) || undefined;
+      severity = asString(hook.severity) || undefined;
+    } else if (hookType === 'stop') {
       type = 'stop';
       const raw = (hook.last_assistant_message || hook.last_output || '').trim();
       summary = raw ? (raw.length > 3000 ? raw.slice(0, 2997) + '...' : raw) : undefined;
@@ -65,13 +77,13 @@ export class HookEngine {
     }
 
     let terminalUrl: string | undefined;
-    if (this.coreAvailable() && hook.tlive_session_id) {
+    if (hookType !== 'external' && this.coreAvailable() && hook.tlive_session_id) {
       const config = loadConfig();
       const baseUrl = config.publicUrl || `http://${this.getLocalIP()}:${config.port || 4590}`;
       terminalUrl = `${baseUrl}/terminal.html?id=${hook.tlive_session_id}&token=${this.token}`;
     }
 
-    const formatted = formatNotification({ type, title, summary, terminalUrl }, adapter.channelType as any);
+    const formatted = formatNotification({ type, title, source, severity, summary, terminalUrl }, adapter.channelType as any);
 
     const outMsg: OutboundMessage = {
       chatId,
@@ -84,6 +96,12 @@ export class HookEngine {
       receiveIdType,
     };
     const result = await adapter.send(outMsg);
-    this.permissions.trackHookMessage(result.messageId, hook.tlive_session_id || '');
+    if (hookType !== 'external') {
+      this.permissions.trackHookMessage(result.messageId, hook.tlive_session_id || '');
+    }
   }
+}
+
+function asString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
