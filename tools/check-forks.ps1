@@ -72,6 +72,24 @@ function Try-Git {
   return ($output | Out-String).Trim()
 }
 
+function Test-GitRef {
+  param(
+    [Parameter(Mandatory = $true)][string]$Repo,
+    [Parameter(Mandatory = $true)][string]$Ref
+  )
+
+  $oldErrorActionPreference = $ErrorActionPreference
+  $ErrorActionPreference = "Continue"
+  try {
+    & git -C $Repo show-ref --verify --quiet $Ref *> $null
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $oldErrorActionPreference
+  }
+
+  return $exitCode -eq 0
+}
+
 function Get-RemoteDefaultBranch {
   param(
     [Parameter(Mandatory = $true)][string]$Repo,
@@ -90,34 +108,74 @@ function Get-RemoteDefaultBranch {
   }
 
   foreach ($candidate in @("main", "master")) {
-    $exists = Try-Git -Repo $Repo -GitArgs @("show-ref", "--verify", "--quiet", "refs/remotes/$Remote/$candidate")
-    if ($LASTEXITCODE -eq 0 -or $exists) { return $candidate }
+    if (Test-GitRef -Repo $Repo -Ref "refs/remotes/$Remote/$candidate") { return $candidate }
   }
 
   return ""
 }
 
-function Resolve-CompareRef {
+function Resolve-LocalRef {
+  param(
+    [Parameter(Mandatory = $true)][string]$Repo
+  )
+
+  $current = Try-Git -Repo $Repo -GitArgs @("branch", "--show-current")
+  if ($current -and (Test-GitRef -Repo $Repo -Ref "refs/heads/$current")) { return "refs/heads/$current" }
+
+  foreach ($branch in @("main", "master")) {
+    $localRef = "refs/heads/$branch"
+    if (Test-GitRef -Repo $Repo -Ref $localRef) { return $localRef }
+  }
+
+  return "HEAD"
+}
+
+function Resolve-OriginRef {
   param(
     [Parameter(Mandatory = $true)][string]$Repo,
     [Parameter(Mandatory = $true)][string]$OriginBranch
   )
 
-  if ($OriginBranch) {
-    $originRef = "refs/remotes/origin/$OriginBranch"
-    Try-Git -Repo $Repo -GitArgs @("show-ref", "--verify", "--quiet", $originRef) | Out-Null
-    if ($LASTEXITCODE -eq 0) { return $originRef }
-  }
-
-  foreach ($branch in @("main", "master")) {
-    $localRef = "refs/heads/$branch"
-    Try-Git -Repo $Repo -GitArgs @("show-ref", "--verify", "--quiet", $localRef) | Out-Null
-    if ($LASTEXITCODE -eq 0) { return $localRef }
+  $tracking = Try-Git -Repo $Repo -GitArgs @("rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
+  if ($tracking -and $tracking.StartsWith("origin/")) {
+    $trackingRef = "refs/remotes/$tracking"
+    if (Test-GitRef -Repo $Repo -Ref $trackingRef) { return $trackingRef }
   }
 
   $current = Try-Git -Repo $Repo -GitArgs @("branch", "--show-current")
-  if ($current) { return "refs/heads/$current" }
-  return "HEAD"
+  if ($current) {
+    $currentOriginRef = "refs/remotes/origin/$current"
+    if (Test-GitRef -Repo $Repo -Ref $currentOriginRef) { return $currentOriginRef }
+  }
+
+  if ($OriginBranch) {
+    $defaultOriginRef = "refs/remotes/origin/$OriginBranch"
+    if (Test-GitRef -Repo $Repo -Ref $defaultOriginRef) { return $defaultOriginRef }
+  }
+
+  foreach ($branch in @("main", "master")) {
+    $originRef = "refs/remotes/origin/$branch"
+    if (Test-GitRef -Repo $Repo -Ref $originRef) { return $originRef }
+  }
+
+  return ""
+}
+
+function Get-AheadBehind {
+  param(
+    [Parameter(Mandatory = $true)][string]$Repo,
+    [Parameter(Mandatory = $true)][string]$LeftRef,
+    [Parameter(Mandatory = $true)][string]$RightRef
+  )
+
+  $counts = Invoke-Git -Repo $Repo -GitArgs @("rev-list", "--left-right", "--count", "$LeftRef...$RightRef")
+  $parts = $counts -split "\s+"
+  if ($parts.Count -lt 2) { throw "cannot parse rev-list counts for $LeftRef...$RightRef" }
+
+  return [pscustomobject]@{
+    Left = [int]$parts[0]
+    Right = [int]$parts[1]
+  }
 }
 
 function Get-ForkStatus {
@@ -126,29 +184,41 @@ function Get-ForkStatus {
   $name = Split-Path -Leaf $Repo
   $remotes = Invoke-Git -Repo $Repo -GitArgs @("remote")
   if (($remotes -split "`r?`n") -notcontains "upstream") { return $null }
+  if (($remotes -split "`r?`n") -notcontains "origin") { throw "missing origin remote" }
 
+  Invoke-Git -Repo $Repo -GitArgs @("fetch", "origin", "--prune") | Out-Null
   Invoke-Git -Repo $Repo -GitArgs @("fetch", "upstream", "--prune") | Out-Null
 
   $upstreamBranch = Get-RemoteDefaultBranch -Repo $Repo -Remote "upstream"
   if (-not $upstreamBranch) { throw "cannot resolve upstream default branch" }
   $originBranch = Get-RemoteDefaultBranch -Repo $Repo -Remote "origin"
+  if (-not $originBranch) { throw "cannot resolve origin default branch" }
 
   $upstreamRef = "refs/remotes/upstream/$upstreamBranch"
-  Try-Git -Repo $Repo -GitArgs @("show-ref", "--verify", "--quiet", $upstreamRef) | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "missing $upstreamRef after fetch" }
+  if (-not (Test-GitRef -Repo $Repo -Ref $upstreamRef)) { throw "missing $upstreamRef after fetch" }
 
-  $baseRef = Resolve-CompareRef -Repo $Repo -OriginBranch $originBranch
-  $counts = Invoke-Git -Repo $Repo -GitArgs @("rev-list", "--left-right", "--count", "$baseRef...$upstreamRef")
-  $parts = $counts -split "\s+"
-  $localAhead = [int]$parts[0]
-  $upstreamAhead = [int]$parts[1]
+  $forkRef = "refs/remotes/origin/$originBranch"
+  if (-not (Test-GitRef -Repo $Repo -Ref $forkRef)) { throw "missing $forkRef after fetch" }
+
+  $localRef = Resolve-LocalRef -Repo $Repo
+  $originRef = Resolve-OriginRef -Repo $Repo -OriginBranch $originBranch
+  if (-not $originRef) { throw "cannot resolve origin comparison ref" }
+
+  $localCounts = Get-AheadBehind -Repo $Repo -LeftRef $localRef -RightRef $originRef
+  $forkCounts = Get-AheadBehind -Repo $Repo -LeftRef $forkRef -RightRef $upstreamRef
+  $workingTreeState = if (Try-Git -Repo $Repo -GitArgs @("status", "--porcelain")) { "dirty" } else { "clean" }
 
   return [pscustomobject]@{
     Name = $name
-    UpstreamAhead = $upstreamAhead
-    LocalAhead = $localAhead
+    OriginAhead = $localCounts.Right
+    LocalAhead = $localCounts.Left
+    ForkAhead = $forkCounts.Left
+    UpstreamAhead = $forkCounts.Right
+    WorkingTreeState = $workingTreeState
     UpstreamBranch = "upstream/$upstreamBranch"
-    BaseRef = $baseRef
+    OriginBranch = "origin/$originBranch"
+    LocalRef = $localRef
+    OriginRef = $originRef
   }
 }
 
@@ -180,7 +250,9 @@ foreach ($repo in $repos) {
     $status = Get-ForkStatus -Repo $repo.FullName
     if ($null -eq $status) { continue }
     if ($status.UpstreamAhead -gt 0) { $hasUpdates = $true }
-    $lines.Add(("{0} upstream +{1}, local +{2}" -f $status.Name, $status.UpstreamAhead, $status.LocalAhead))
+    $lines.Add($status.Name)
+    $lines.Add(("  local vs origin: local +{0}, origin +{1}, {2}" -f $status.LocalAhead, $status.OriginAhead, $status.WorkingTreeState))
+    $lines.Add(("  origin vs upstream: fork +{0}, upstream +{1}" -f $status.ForkAhead, $status.UpstreamAhead))
   } catch {
     $hasErrors = $true
     $lines.Add(("{0} check failed: {1}" -f $repo.Name, $_.Exception.Message))
